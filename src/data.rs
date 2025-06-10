@@ -27,7 +27,7 @@ impl BfInstruction {
             _ => None,
         }
     }
-    
+
     pub fn to_u8(self) -> u8 {
         self as u8
     }
@@ -48,7 +48,6 @@ impl Display for BfInstruction {
         write!(f, "{}", symbol)
     }
 }
-
 
 #[derive(Debug)]
 pub struct CompressedBF {
@@ -90,7 +89,10 @@ impl CompressedBF {
             panic!("Capacity must be greater than or equal to size");
         }
         let required_bytes = (capacity + 1) / 2;
-        CompressedBF { data: vec![0u8; required_bytes], size }
+        CompressedBF {
+            data: vec![0u8; required_bytes],
+            size,
+        }
     }
 
     pub fn get(&self, index: usize) -> Option<BfInstruction> {
@@ -134,7 +136,7 @@ impl CompressedBF {
         self.size += 1;
         self.set(self.size - 1, value);
     }
-    
+
     pub fn to_vec(&self) -> Vec<BfInstruction> {
         let mut res = Vec::new();
         for i in 0..self.size {
@@ -142,7 +144,7 @@ impl CompressedBF {
         }
         res
     }
-    
+
     pub fn to_string(&self) -> String {
         let mut s = String::new();
         for i in 0..self.size {
@@ -160,7 +162,6 @@ impl CompressedBF {
         }
         s
     }
-
 }
 
 impl Clone for CompressedBF {
@@ -180,7 +181,6 @@ impl Display for CompressedBF {
         write!(f, "{}", instructions.join(""))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -244,7 +244,11 @@ mod tests {
         bf.set(2, BfInstruction::Dec);
         assert_eq!(
             bf.to_vec(),
-            vec![BfInstruction::Left, BfInstruction::Right, BfInstruction::Dec]
+            vec![
+                BfInstruction::Left,
+                BfInstruction::Right,
+                BfInstruction::Dec
+            ]
         );
     }
 
