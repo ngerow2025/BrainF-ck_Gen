@@ -1,10 +1,11 @@
-use crate::MAX_TAPE_SIZE;
 use crate::data::{BfInstruction, CompressedBF};
+use crate::{MAX_TAPE_SIZE, run};
 use ahash::RandomState;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicUsize;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum BfRunResult {
@@ -190,6 +191,129 @@ pub fn run_program_fragment(
             collect_and_return(BfRunResult::Success, &state_tracker)
         }
     })
+}
+
+const MAX_STEPS: usize = 131066;
+
+static MAX_STEPS_REACHED: AtomicUsize = AtomicUsize::new(0);
+
+pub fn run_program_fragment_without_states(
+    program_fragment: &RunningProgramInfo,
+    target_output: &[u8],
+) -> BfRunResult {
+    let mut steps = 0;
+
+    let mut tape = program_fragment.continue_state.program_state.tape;
+    let mut tape_head = program_fragment.continue_state.program_state.tape_head;
+    let mut pc = program_fragment.continue_state.resume_pc; // Start from the last instruction
+    let mut output_ind = program_fragment.continue_state.resume_output_ind; // Resume from the last output index
+
+    while pc < program_fragment.code.size() {
+        steps += 1;
+
+        if steps > MAX_STEPS {
+            // Do not update MAX_STEPS_REACHED here, as this is the fallback to run_program_fragment
+            return run_program_fragment(program_fragment, target_output);
+        }
+
+        match program_fragment.code.get(pc) {
+            None => {
+                MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                panic!("could not read current BF instruction");
+            }
+            Some(BfInstruction::Inc) => {
+                tape[tape_head as usize] = tape[tape_head as usize].wrapping_add(1);
+            }
+            Some(BfInstruction::Dec) => {
+                tape[tape_head as usize] = tape[tape_head as usize].wrapping_sub(1);
+            }
+            Some(BfInstruction::Left) => {
+                if tape_head == 0 {
+                    MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                    return BfRunResult::TapeHeadBoundError;
+                }
+                tape_head -= 1;
+            }
+            Some(BfInstruction::Right) => {
+                if tape_head as usize + 1 == MAX_TAPE_SIZE {
+                    MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                    return BfRunResult::OOMError;
+                }
+                tape_head += 1;
+            }
+            Some(BfInstruction::LoopStart) => {
+                if tape[tape_head as usize] == 0 {
+                    if program_fragment.jump_table[pc] == -1 {
+                        MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                        panic!("jump table is not initialized correctly");
+                    }
+                    if program_fragment.jump_table[pc] == -2 {
+                        MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                        return BfRunResult::NOOPError;
+                    }
+                    pc = program_fragment.jump_table[pc] as usize;
+                    continue;
+                }
+            }
+            Some(BfInstruction::LoopEnd) => {
+                if tape[tape_head as usize] != 0 {
+                    if program_fragment.jump_table[pc] == -1 {
+                        MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                        panic!("jump table is not initialized correctly");
+                    }
+                    pc = program_fragment.jump_table[pc] as usize;
+                    continue;
+                }
+            }
+            Some(BfInstruction::Output) => {
+                if output_ind == target_output.len() {
+                    MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                    return BfRunResult::TargetMismatchError;
+                }
+                if target_output[output_ind] != tape[tape_head as usize] {
+                    MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                    return BfRunResult::TargetMismatchError;
+                }
+                output_ind += 1;
+            }
+            Some(BfInstruction::Input) => {
+                MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+                return BfRunResult::InputTokenError;
+            }
+        }
+        pc += 1;
+    }
+
+    if program_fragment.current_paren_count != 0 {
+        MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+        return BfRunResult::IncompleteLoopSuccess(ContinueState {
+            program_state: ProgramState {
+                tape: tape.clone(),
+                tape_head,
+            },
+            resume_pc: pc,
+            resume_output_ind: output_ind,
+        });
+    }
+
+    let result = if output_ind != target_output.len() {
+        BfRunResult::IncompleteOutputSuccess(ContinueState {
+            program_state: ProgramState {
+                tape: tape.clone(),
+                tape_head,
+            },
+            resume_pc: pc,
+            resume_output_ind: output_ind,
+        })
+    } else {
+        BfRunResult::Success
+    };
+    MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
+    result
+}
+
+pub fn get_max_steps_reached() -> usize {
+    MAX_STEPS_REACHED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn tabulate_hashset_sizes(state_tracker: &[HashSet<ProgramState, RandomState>]) {

@@ -3,7 +3,8 @@
 
 use crate::data::{BfInstruction, CompressedBF};
 use crate::run::{
-    BfRunResult, ContinueState, ProgramState, RunningProgramInfo, run_program_fragment,
+    BfRunResult, ContinueState, ProgramState, RunningProgramInfo, get_max_steps_reached,
+    run_program_fragment, run_program_fragment_without_states,
 };
 use ahash::RandomState;
 use std::{
@@ -12,8 +13,8 @@ use std::{
     io::{BufReader, BufWriter, Read, Write},
     marker::PhantomData,
     sync::{
-        mpsc::{self, Sender},
         Arc, Mutex,
+        mpsc::{self, Sender},
     },
     thread::{self, JoinHandle},
 };
@@ -136,7 +137,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                 new_program.jump_table.push((loop_start_loc + 1) as i64);
                 new_program.current_paren_count -= 1;
 
-                let run_res = run_program_fragment(&new_program, target_output);
+                let run_res = run_program_fragment_without_states(&new_program, target_output);
                 if let Some(working_program) = handle_run_result(
                     run_res,
                     new_program,
@@ -153,7 +154,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                 new_program.current_paren_count += 1;
                 //add a -2 to the jump table to mark the start of the loop
                 new_program.jump_table.push(-2);
-                let run_res = run_program_fragment(&new_program, target_output);
+                let run_res = run_program_fragment_without_states(&new_program, target_output);
                 if let Some(working_program) = handle_run_result(
                     run_res,
                     new_program,
@@ -168,7 +169,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                 let mut new_program = program_seed.clone();
                 new_program.code.append(BfInstruction::Output);
                 new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment(&new_program, target_output);
+                let run_res = run_program_fragment_without_states(&new_program, target_output);
                 if let Some(working_program) = handle_run_result(
                     run_res,
                     new_program,
@@ -185,7 +186,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                 let mut new_program = program_seed.clone();
                 new_program.code.append(BfInstruction::Left);
                 new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment(&new_program, target_output);
+                let run_res = run_program_fragment_without_states(&new_program, target_output);
                 if let Some(working_program) = handle_run_result(
                     run_res,
                     new_program,
@@ -202,7 +203,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                 let mut new_program = program_seed.clone();
                 new_program.code.append(BfInstruction::Right);
                 new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment(&new_program, target_output);
+                let run_res = run_program_fragment_without_states(&new_program, target_output);
                 if let Some(working_program) = handle_run_result(
                     run_res,
                     new_program,
@@ -219,7 +220,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                 let mut new_program = program_seed.clone();
                 new_program.code.append(BfInstruction::Inc);
                 new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment(&new_program, target_output);
+                let run_res = run_program_fragment_without_states(&new_program, target_output);
                 if let Some(working_program) = handle_run_result(
                     run_res,
                     new_program,
@@ -236,7 +237,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                 let mut new_program = program_seed.clone();
                 new_program.code.append(BfInstruction::Dec);
                 new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment(&new_program, target_output);
+                let run_res = run_program_fragment_without_states(&new_program, target_output);
                 if let Some(working_program) = handle_run_result(
                     run_res,
                     new_program,
@@ -249,7 +250,13 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
         }
         current_program_writing_head.flush();
 
-        if current_program_size == 13 {
+        println!(
+            "Finished processing all programs of size {}. Max steps reached: {}",
+            current_program_size - 1,
+            get_max_steps_reached()
+        );
+
+        if current_program_size == 16 {
             return vec![]; // Stop condition for testing purposes
         }
 
