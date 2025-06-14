@@ -7,6 +7,8 @@ use crate::run::{
     run_program_fragment, run_program_fragment_without_states,
 };
 use ahash::RandomState;
+use core::panic;
+use std::f32::consts::E;
 use std::{
     collections::HashSet,
     fs::{File, OpenOptions},
@@ -18,16 +20,20 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
+use color_eyre::eyre::{bail, eyre, Result};
 
 const MAX_TAPE_SIZE: usize = 3;
 mod data;
 mod run;
 
-fn main() {
+fn main() -> Result<()> {
+    // initialize color_eyre’s handler
+    color_eyre::install()?;
+
     let target_output: &[u8] = &[15u8]; // Example target output
 
     //+++[>+++++<-]<.
-    let program = find_program(target_output, "".to_string());
+    let program = find_program(target_output, "".to_string())?;
 
     if program.is_empty() {
         println!("No program found to produce the target output.");
@@ -35,9 +41,11 @@ fn main() {
         println!("Found program: {:?}", program);
         // Optionally, you can write the program to a file or execute it.
     }
+
+    Ok(())
 }
 
-fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruction> {
+fn find_program(target_output: &[u8], starting_program: String) -> Result<Vec<BfInstruction>> {
     //parse the starting program
     let starting_program = CompressedBF::from_string(starting_program);
 
@@ -54,7 +62,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
         }
     }
     if paren_count != 0 {
-        panic!("Starting program has unmatched parentheses.");
+        bail!("Starting program has unmatched parentheses.");
     }
 
     // construct the jump table
@@ -68,7 +76,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     jump_table[loop_start_index] = i as i64 + 1; // set the loop start to the current index + 1
                     jump_table.push((loop_start_index + 1) as i64); // append the index of the loop start + 1
                 } else {
-                    panic!("Loop end without matching loop start.");
+                    bail!("Loop end without matching loop start.");
                 }
             }
             _ => jump_table.push(-1), // -1 indicates non-loop instruction
@@ -144,7 +152,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     &mut current_program_writing_head,
                     &mut found_states,
                 ) {
-                    return working_program;
+                    return Ok(working_program);
                 }
             }
             //loop start instruction
@@ -161,7 +169,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     &mut current_program_writing_head,
                     &mut found_states,
                 ) {
-                    return working_program;
+                    return Ok(working_program);
                 }
             }
             //output instruction
@@ -176,7 +184,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     &mut current_program_writing_head,
                     &mut found_states,
                 ) {
-                    return working_program;
+                    return Ok(working_program);
                 }
             }
             //left instruction
@@ -193,7 +201,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     &mut current_program_writing_head,
                     &mut found_states,
                 ) {
-                    return working_program;
+                    return Ok(working_program);
                 }
             }
             //right instruction
@@ -210,7 +218,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     &mut current_program_writing_head,
                     &mut found_states,
                 ) {
-                    return working_program;
+                    return Ok(working_program);
                 }
             }
             //increment instruction
@@ -227,7 +235,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     &mut current_program_writing_head,
                     &mut found_states,
                 ) {
-                    return working_program;
+                    return Ok(working_program);
                 }
             }
             //decrement instruction
@@ -244,7 +252,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
                     &mut current_program_writing_head,
                     &mut found_states,
                 ) {
-                    return working_program;
+                    return Ok(working_program);
                 }
             }
         }
@@ -257,7 +265,7 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
         );
 
         if current_program_size == 16 {
-            return vec![]; // Stop condition for testing purposes
+            return Err(eyre!("Reached maximum program size of 16 without finding a solution."));
         }
 
         println!(
@@ -302,7 +310,6 @@ fn find_program(target_output: &[u8], starting_program: String) -> Vec<BfInstruc
         //debug print the number of programs
     }
 
-    Vec::new()
 }
 
 fn handle_run_result(
@@ -346,12 +353,17 @@ pub struct DiskSeedWriter {
 impl DiskSeedWriter {
     pub fn new(program_size: usize) -> Self {
         let file_path = format!("program_seeds_{}.bin", program_size);
-        let file = OpenOptions::new()
+        let file = match OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(file_path)
-            .expect("Could not open file for writing");
+        {
+            Ok(file) => file,
+            Err(err) => {
+                panic!("Could not open file for writing: {}", err);
+            }
+        };
 
         let mut file = BufWriter::with_capacity(1_000_000_000, file);
         file.write(&program_size.to_ne_bytes()).unwrap();
@@ -428,7 +440,7 @@ impl DiskSeedWriter {
         // Drop sender so the worker thread knows there’s nothing more
         self.sender.take();
         if let Some(handle) = self.handle.take() {
-            handle.join().expect("Worker thread panicked");
+            handle.join().expect("Failed to join worker thread of DiskSeedWriter");
         }
 
         let mut file = self.file.lock().unwrap();

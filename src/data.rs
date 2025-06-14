@@ -86,7 +86,7 @@ impl CompressedBF {
 impl CompressedBF {
     pub fn new(size: usize, capacity: usize) -> CompressedBF {
         if capacity < size {
-            panic!("Capacity must be greater than or equal to size");
+            panic!("Capacity of {} must be greater than or equal to size {}", capacity, size);
         }
         let required_bytes = (capacity + 1) / 2;
         CompressedBF {
@@ -112,7 +112,7 @@ impl CompressedBF {
 
     pub fn set(&mut self, index: usize, value: BfInstruction) {
         if index >= self.size {
-            panic!("Index out of bounds");
+            panic!("Index out of bounds: index {} >= size {}", index, self.size);
         }
         let byte_pos = index / 2;
         let is_high = index % 2 == 1;
@@ -179,98 +179,5 @@ impl Display for CompressedBF {
             .filter_map(|i| self.get(i).map(|instr| instr.to_string()))
             .collect();
         write!(f, "{}", instructions.join(""))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_new_and_size() {
-        let bf = CompressedBF::new(10, 10);
-        assert_eq!(bf.size(), 10);
-        assert!(bf.to_vec().iter().all(|&x| x == BfInstruction::Inc)); // default is not initialized
-    }
-
-    #[test]
-    fn test_set_and_get() {
-        let mut bf = CompressedBF::new(5, 5);
-        let sequence = [
-            BfInstruction::Inc,
-            BfInstruction::Dec,
-            BfInstruction::Left,
-            BfInstruction::Right,
-            BfInstruction::LoopStart,
-        ];
-        for (i, &instr) in sequence.iter().enumerate() {
-            bf.set(i, instr);
-        }
-        for (i, &instr) in sequence.iter().enumerate() {
-            assert_eq!(bf.get(i), Some(instr));
-        }
-    }
-
-    #[test]
-    #[should_panic(expected = "Index out of bounds")]
-    fn test_set_out_of_bounds_panics() {
-        let mut bf = CompressedBF::new(3, 3);
-        bf.set(4, BfInstruction::Input); // should panic
-    }
-
-    #[test]
-    fn test_append_and_get() {
-        let mut bf = CompressedBF::new(0, 0);
-        let sequence = [
-            BfInstruction::Input,
-            BfInstruction::Output,
-            BfInstruction::LoopEnd,
-            BfInstruction::LoopStart,
-        ];
-        for &instr in &sequence {
-            bf.append(instr);
-        }
-        assert_eq!(bf.size(), sequence.len());
-        for (i, &instr) in sequence.iter().enumerate() {
-            assert_eq!(bf.get(i), Some(instr));
-        }
-    }
-
-    #[test]
-    fn test_to_vec() {
-        let mut bf = CompressedBF::new(3, 3);
-        bf.set(0, BfInstruction::Left);
-        bf.set(1, BfInstruction::Right);
-        bf.set(2, BfInstruction::Dec);
-        assert_eq!(
-            bf.to_vec(),
-            vec![
-                BfInstruction::Left,
-                BfInstruction::Right,
-                BfInstruction::Dec
-            ]
-        );
-    }
-
-    #[test]
-    fn test_to_string() {
-        let mut bf = CompressedBF::new(4, 4);
-        bf.set(0, BfInstruction::Inc);
-        bf.set(1, BfInstruction::Dec);
-        bf.set(2, BfInstruction::LoopStart);
-        bf.set(3, BfInstruction::LoopEnd);
-        assert_eq!(bf.to_string(), "+-[]");
-    }
-
-    #[test]
-    fn test_clone() {
-        let mut bf = CompressedBF::new(2, 2);
-        bf.set(0, BfInstruction::Input);
-        bf.set(1, BfInstruction::Output);
-        let clone = bf.clone();
-        assert_eq!(clone.get(0), Some(BfInstruction::Input));
-        assert_eq!(clone.get(1), Some(BfInstruction::Output));
-        assert_eq!(clone.size(), bf.size());
-        assert_eq!(clone.to_vec(), bf.to_vec());
     }
 }

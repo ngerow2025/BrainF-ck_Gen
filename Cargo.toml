@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 ahash = "0.8.12"
+color-eyre = "0.6.5"
 
 [profile.release]
 debug = true
