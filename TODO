@@ -1,0 +1,2 @@
+look at smallvec to get rid of heap allocation, they are destroying performance in the hot path
+add additional logic for jump tables to handle repeated loop closes and starts better

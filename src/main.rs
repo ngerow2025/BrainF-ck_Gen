@@ -1,557 +1,636 @@
-//look at smallvec to get rid of heap allocation, they are destroying performance in the hot path
-//add additional logic for jump tables to handle repeated loop closes and starts better
-
-use crate::data::{BfInstruction, CompressedBF};
-use crate::run::{
-    BfRunResult, ContinueState, ProgramState, RunningProgramInfo, get_max_steps_reached,
-    run_program_fragment, run_program_fragment_without_states,
-};
-use ahash::RandomState;
 use core::panic;
-use std::f32::consts::E;
-use std::{
-    collections::HashSet,
-    fs::{File, OpenOptions},
-    io::{BufReader, BufWriter, Read, Write},
-    marker::PhantomData,
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, Sender},
-    },
-    thread::{self, JoinHandle},
+use crossterm::event::{self, KeyEventKind, KeyModifiers};
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::text::{Line, Text};
+use ratatui::widgets::{Block, Paragraph};
+
+use std::error::Error;
+use std::io;
+
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture, KeyCode},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use color_eyre::eyre::{bail, eyre, Result};
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Layout},
+    style::{Color, Modifier, Style},
+    widgets::{Borders, Wrap},
+};
 
-const MAX_TAPE_SIZE: usize = 3;
-mod data;
-mod run;
+use crossterm::event::Event as CEvent;
+use ratatui::prelude::*;
+use ratatui::widgets::*;
+use tui_scrollview::{ScrollView, ScrollViewState};
 
-fn main() -> Result<()> {
-    // initialize color_eyre’s handler
-    color_eyre::install()?;
+#[derive(Default, Clone, Debug)]
+struct InputEntry {
+    bytes: Vec<u8>,
+}
 
-    let target_output: &[u8] = &[15u8]; // Example target output
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+enum Mode {
+    EditAscii,
+    EditDec,
+    EditHex,
+    Normal,
+    Running,
+}
 
-    //+++[>+++++<-]<.
-    let program = find_program(target_output, "".to_string())?;
+#[derive(Debug)]
+struct App {
+    inputs: Vec<InputEntry>,
+    selected_input: usize,
+    mode: Mode,
+    edit_cursor: usize, //this is the character index in the current input entry being edited
+    digit_cursor: usize, //this is the digit index in the current input entry being edited
+    scroll_state: ScrollViewState,
+    calculated_current_layout: Vec<Rect>, // stores the positions of each input entry in the layout
+    input_display_area: Option<Rect>,
+    copy_buffer: Option<Vec<u8>>,
+}
 
-    if program.is_empty() {
-        println!("No program found to produce the target output.");
-    } else {
-        println!("Found program: {:?}", program);
-        // Optionally, you can write the program to a file or execute it.
+#[allow(unused)]
+enum Direction {
+    Up,
+    Left,
+    Down,
+    Right,
+    UpLeft,
+    UpRight,
+    DownLeft,
+    DownRight,
+}
+
+impl App {
+    fn new() -> Self {
+        Self {
+            inputs: vec![InputEntry {
+                bytes: vec![0u8; 4],
+            }],
+            selected_input: 0,
+            mode: Mode::Normal,
+            edit_cursor: 0,
+            digit_cursor: 0,
+            scroll_state: ScrollViewState::default(),
+            calculated_current_layout: vec![],
+            input_display_area: None,
+            copy_buffer: None,
+        }
+    }
+
+    fn draw(&mut self, f: &mut Frame) {
+        let chunks = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+
+        let controls_text = match self.mode {
+            Mode::Normal => {
+                "Normal: 'a' add, 'd' delete, 'e' edit, 'r' run, arrows navigate, Ctrl+C copy, Ctrl+V paste, Ctrl+X cut, 'q' quit"
+            }
+            Mode::EditAscii => {
+                "Edit ASCII: Type chars  , +/- resize, Shift+arrows move cursor/mode, Ctrl+arrows inc/dec value, Esc exit"
+            }
+            Mode::EditDec => {
+                "Edit DEC: Type digits     , +/- resize, Shift+arrows move cursor/mode, Ctrl+arrows inc/dec value, Esc exit"
+            }
+            Mode::EditHex => {
+                "Edit HEX: Type hex digits , +/- resize, Shift+arrows move cursor/mode, Ctrl+arrows inc/dec value, Esc exit"
+            }
+            Mode::Running => "Running: Press any key to return to Normal mode",
+        };
+
+        f.render_widget(
+            Paragraph::new(controls_text)
+                .block(Block::default().borders(Borders::ALL).title("Controls"))
+                .wrap(Wrap { trim: true }),
+            chunks[0],
+        );
+
+        let inputs_area = chunks[1];
+
+        let grid_width = inputs_area.width - 1;
+        self.calculate_layout_height(grid_width);
+
+        let layout_height = self
+            .calculated_current_layout
+            .iter()
+            .map(|rect| rect.bottom())
+            .max()
+            .unwrap_or(0);
+
+        let mut scroll_view = ScrollView::new(Size {
+            width: inputs_area.width,
+            height: layout_height,
+        })
+        .vertical_scrollbar_visibility(tui_scrollview::ScrollbarVisibility::Automatic)
+        .horizontal_scrollbar_visibility(tui_scrollview::ScrollbarVisibility::Never);
+
+        for (i, entry) in self.inputs.iter().enumerate() {
+            let render_line = |label: &str,
+                               values: &[String],
+                               highlight: bool,
+                               selected_idx: usize,
+                               digit_cursor: usize| {
+                let mut line: Vec<Span<'static>> = vec![
+                    Span::styled(label.to_string(), Style::default().fg(Color::Gray)),
+                    Span::raw(" ".to_string()),
+                ];
+
+                for (j, val) in values.iter().enumerate() {
+                    let required_spacing = 5 - val.chars().count();
+                    let mut style = Style::default().fg(Color::White).bg(Color::Reset);
+                    if highlight && j == selected_idx {
+                        style = style.bg(Color::DarkGray).add_modifier(Modifier::BOLD);
+                    }
+
+                    // Highlight the digit at digit_cursor differently
+                    if highlight && j == selected_idx {
+                        let chars: Vec<char> = val.chars().collect();
+                        let mut spans = Vec::new();
+                        for (idx, ch) in chars.iter().enumerate() {
+                            if idx == digit_cursor {
+                                // Special style for digit_cursor
+                                spans.push(Span::styled(
+                                    ch.to_string(),
+                                    style
+                                        .bg(Color::Blue)
+                                        .fg(Color::Yellow)
+                                        .add_modifier(Modifier::REVERSED),
+                                ));
+                            } else {
+                                spans.push(Span::styled(ch.to_string(), style));
+                            }
+                        }
+                        line.extend(spans);
+                    } else {
+                        line.push(Span::styled(val.clone(), style));
+                    }
+
+                    line.push(Span::styled(" ".repeat(required_spacing), style));
+                }
+
+                Line::from(line)
+            };
+
+            let ascii: Vec<String> = entry
+                .bytes
+                .iter()
+                .map(|b| {
+                    if b.is_ascii_graphic() {
+                        format!("{}", *b as char)
+                    } else {
+                        match b {
+                            b'\n' => "\\n".to_string(),
+                            b'\r' => "\\r".to_string(),
+                            b'\t' => "\\t".to_string(),
+                            0 => "\\0".to_string(),
+                            _ => "\u{25AF}".to_string(), // Unicode replacement character
+                        }
+                    }
+                })
+                .collect();
+            let dec: Vec<String> = entry.bytes.iter().map(|b| format!("{:03}", b)).collect();
+
+            let hex: Vec<String> = entry.bytes.iter().map(|b| format!("{:02X}", b)).collect();
+
+            let is_selected = self.selected_input == i;
+
+            let total = Text::from(vec![
+                render_line(
+                    "ASCII:",
+                    &ascii,
+                    self.mode == Mode::EditAscii && is_selected,
+                    self.edit_cursor,
+                    self.digit_cursor,
+                ),
+                render_line(
+                    "DEC:  ",
+                    &dec,
+                    self.mode == Mode::EditDec && is_selected,
+                    self.edit_cursor,
+                    self.digit_cursor,
+                ),
+                render_line(
+                    "HEX:  ",
+                    &hex,
+                    self.mode == Mode::EditHex && is_selected,
+                    self.edit_cursor,
+                    self.digit_cursor,
+                ),
+            ]);
+
+            scroll_view.render_widget(
+                Paragraph::new(total).block(
+                    Block::default()
+                        .title(format!("input #{i}"))
+                        .borders(Borders::all())
+                        .border_type(if is_selected {
+                            BorderType::Double
+                        } else {
+                            BorderType::Plain
+                        }),
+                ),
+                self.calculated_current_layout[i],
+            );
+        }
+
+        f.render_stateful_widget(scroll_view, inputs_area, &mut self.scroll_state);
+        self.input_display_area = Some(inputs_area);
+
+        f.render_widget(
+            Paragraph::new(format!("Mode: {:?}", self.mode))
+                .block(Block::default().borders(Borders::NONE)),
+            chunks[2],
+        );
+    }
+
+    fn calculate_layout_height(&mut self, grid_width: u16) {
+        let mut current_grid_x = 0;
+        let mut current_grid_y = 0;
+        self.calculated_current_layout.clear();
+        for entry in &self.inputs {
+            let required_width = 7 + 5 * entry.bytes.len() as u16;
+            if current_grid_x + required_width > grid_width {
+                current_grid_x = 0;
+                current_grid_y += 1;
+            }
+            self.calculated_current_layout.push(Rect::new(
+                current_grid_x,
+                5 * current_grid_y,
+                required_width,
+                5,
+            ));
+            current_grid_x += required_width;
+        }
+    }
+
+    fn find_closest(
+        &self,
+        current_area: Rect,
+        out_from_dir: Direction,
+        search_dir: Direction,
+    ) -> Option<usize> {
+        let out_from = match out_from_dir {
+            Direction::Up => (0, -1),
+            Direction::Down => (0, 1),
+            Direction::Left => (-1, 0),
+            Direction::Right => (1, 0),
+            Direction::UpLeft => (-1, -1),
+            Direction::UpRight => (1, -1),
+            Direction::DownLeft => (-1, 1),
+            Direction::DownRight => (1, 1),
+        };
+
+        let search_to = match search_dir {
+            Direction::Up => (0, -1),
+            Direction::Down => (0, 1),
+            Direction::Left => (-1, 0),
+            Direction::Right => (1, 0),
+            Direction::UpLeft => (-1, -1),
+            Direction::UpRight => (1, -1),
+            Direction::DownLeft => (-1, 1),
+            Direction::DownRight => (1, 1),
+        };
+
+        // start just outside current_area based on out_from direction
+        let mid_x = current_area.left() as i32 + (current_area.width as i32 / 2);
+        let mid_y = current_area.top() as i32 + (current_area.height as i32 / 2);
+        let mut x = mid_x;
+        let mut y = mid_y;
+        if out_from.0 != 0 {
+            while current_area.contains(Position::new(x as u16, mid_y as u16)) {
+                x += out_from.0;
+            }
+        }
+        if out_from.1 != 0 {
+            while current_area.contains(Position::new(mid_x as u16, y as u16)) {
+                y += out_from.1;
+            }
+        }
+        loop {
+            let pos = Position::new(x as u16, y as u16);
+            for (i, area) in self.calculated_current_layout.iter().enumerate() {
+                if area.contains(pos) {
+                    return Some(i);
+                }
+            }
+            let next_x = x + search_to.0;
+            let next_y = y + search_to.1;
+            if next_x < 0 || next_y < 0 {
+                break;
+            }
+            if next_x
+                >= self
+                    .calculated_current_layout
+                    .iter()
+                    .map(|r| r.right())
+                    .max()
+                    .unwrap_or(0) as i32
+                || next_y
+                    >= self
+                        .calculated_current_layout
+                        .iter()
+                        .map(|r| r.bottom())
+                        .max()
+                        .unwrap_or(0) as i32
+            {
+                break;
+            }
+            x = next_x;
+            y = next_y;
+        }
+        None
+    }
+
+    //make sure the currently selected input is visible in the scroll view
+    fn adjust_scroll(&mut self) {
+        // The area of the selected widget (in buffer‐space coords)
+        let target_area = self.calculated_current_layout[self.selected_input];
+
+        let mut current_scroll = self.scroll_state.offset();
+        let top_seen = current_scroll.y;
+        let bottom_seen = current_scroll.y + self.input_display_area.unwrap().height;
+
+        if top_seen > target_area.top() {
+            // Scroll up to make the top of the area visible
+            current_scroll = Position::new(current_scroll.x, target_area.top());
+        } else if bottom_seen < target_area.bottom() {
+            // Scroll down to make the bottom of the area visible
+            current_scroll = Position::new(
+                current_scroll.x,
+                target_area.bottom() - self.input_display_area.unwrap().height,
+            );
+        }
+
+        self.scroll_state.set_offset(current_scroll);
+    }
+
+    fn handle_event(&mut self, ev: CEvent) -> bool {
+        if let CEvent::Key(key) = ev {
+            if key.kind == KeyEventKind::Press {
+                match self.mode {
+                    Mode::Normal => match key.code {
+                        KeyCode::Char('q') => return false,
+                        KeyCode::Char('a') => self.inputs.push(InputEntry {
+                            bytes: vec![0u8; 1],
+                        }),
+                        KeyCode::Char('d') => {
+                            if self.inputs.len() > 1 {
+                                self.inputs.remove(self.selected_input);
+                                if self.selected_input >= self.inputs.len() {
+                                    self.selected_input = self.inputs.len() - 1;
+                                }
+                            }
+                        }
+                        KeyCode::Char('e') => {
+                            self.mode = Mode::EditAscii;
+                            self.edit_cursor = 0;
+                        }
+                        KeyCode::Char('r') => self.mode = Mode::Running,
+                        KeyCode::Up => {
+                            if let Some(idx) = self.find_closest(
+                                self.calculated_current_layout[self.selected_input],
+                                Direction::Up,
+                                Direction::Left,
+                            ) {
+                                self.selected_input = idx;
+                                self.adjust_scroll();
+                            }
+                        }
+                        KeyCode::Down => {
+                            if let Some(idx) = self.find_closest(
+                                self.calculated_current_layout[self.selected_input],
+                                Direction::Down,
+                                Direction::Left,
+                            ) {
+                                self.selected_input = idx;
+                                self.adjust_scroll();
+                            }
+                        }
+                        KeyCode::Left => {
+                            if let Some(idx) = self.find_closest(
+                                self.calculated_current_layout[self.selected_input],
+                                Direction::Left,
+                                Direction::Left,
+                            ) {
+                                self.selected_input = idx;
+                            }
+                        }
+                        KeyCode::Right => {
+                            if let Some(idx) = self.find_closest(
+                                self.calculated_current_layout[self.selected_input],
+                                Direction::Right,
+                                Direction::Right,
+                            ) {
+                                self.selected_input = idx;
+                            }
+                        }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            // Clear the selected input
+                            self.copy_buffer = Some(self.inputs[self.selected_input].bytes.clone());
+                        }
+                        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            // Paste the copied bytes into a new input entry at the current position
+                            if let Some(buffer) = &self.copy_buffer {
+                                self.inputs.insert(
+                                    self.selected_input + 1,
+                                    InputEntry {
+                                        bytes: buffer.clone(),
+                                    },
+                                );
+                                self.selected_input += 1;
+                            }
+                        }
+                        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            self.copy_buffer = Some(self.inputs[self.selected_input].bytes.clone());
+                            if self.inputs.len() > 1 {
+                                self.inputs.remove(self.selected_input);
+                                if self.selected_input >= self.inputs.len() {
+                                    self.selected_input = self.inputs.len() - 1;
+                                }
+                            }
+                        }
+
+                        _ => {}
+                    },
+                    mode @ (Mode::EditAscii | Mode::EditDec | Mode::EditHex) => match key.code {
+                        KeyCode::Char('+') => {
+                            self.inputs[self.selected_input].bytes.push(0);
+                        }
+                        KeyCode::Char('-') => {
+                            if !self.inputs[self.selected_input].bytes.len() > 1 {
+                                self.inputs[self.selected_input].bytes.pop();
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if let Mode::EditAscii = self.mode {
+                                if c.is_ascii() {
+                                    self.inputs[self.selected_input].bytes[self.edit_cursor] =
+                                        c as u8;
+                                }
+                            }
+                            if let Mode::EditDec = self.mode {
+                                if c.is_ascii_digit() {
+                                    //get the current digits of the value
+                                    let prev_value = self.inputs[self.selected_input].bytes
+                                        [self.edit_cursor]
+                                        as usize;
+                                    let new_digit_value = c.to_digit(10).unwrap() as usize;
+                                    let old_hundreds = prev_value / 100;
+                                    let old_tens = (prev_value / 10) % 10;
+                                    let old_units = prev_value % 10;
+                                    let new_value = match self.digit_cursor {
+                                        0 => new_digit_value * 100 + old_tens * 10 + old_units,
+                                        1 => old_hundreds * 100 + new_digit_value * 10 + old_units,
+                                        2 => old_hundreds * 100 + old_tens * 10 + new_digit_value,
+                                        _ => prev_value,
+                                    };
+
+                                    if new_value < 256 {
+                                        self.inputs[self.selected_input].bytes[self.edit_cursor] =
+                                            new_value as u8;
+                                    } else {
+                                        self.inputs[self.selected_input].bytes[self.edit_cursor] =
+                                            0xFF;
+                                    }
+                                }
+                            }
+                            if let Mode::EditHex = self.mode {
+                                if c.is_ascii_hexdigit() {
+                                    let prev_value =
+                                        self.inputs[self.selected_input].bytes[self.edit_cursor];
+                                    let new_digit_value = c.to_digit(16).unwrap() as u8;
+                                    let new_value = match self.digit_cursor {
+                                        0 => (prev_value & 0x0F) | (new_digit_value << 4),
+                                        1 => (prev_value & 0xF0) | new_digit_value,
+                                        _ => prev_value,
+                                    };
+
+                                    self.inputs[self.selected_input].bytes[self.edit_cursor] =
+                                        new_value;
+                                }
+                            }
+                        }
+                        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            if self.edit_cursor > 0 {
+                                self.edit_cursor -= 1;
+                            }
+                        }
+                        KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            let len = self.inputs[self.selected_input].bytes.len();
+                            if self.edit_cursor + 1 < len {
+                                self.edit_cursor += 1;
+                            }
+                        }
+                        KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            self.mode = match self.mode {
+                                Mode::EditAscii => Mode::EditHex,
+                                Mode::EditHex => Mode::EditDec,
+                                Mode::EditDec => Mode::EditAscii,
+                                _ => self.mode,
+                            };
+                        }
+                        KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            self.mode = match self.mode {
+                                Mode::EditAscii => Mode::EditDec,
+                                Mode::EditDec => Mode::EditHex,
+                                Mode::EditHex => Mode::EditAscii,
+                                _ => self.mode,
+                            };
+                        }
+                        KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            self.inputs[self.selected_input].bytes[self.edit_cursor] =
+                                self.inputs[self.selected_input].bytes[self.edit_cursor]
+                                    .saturating_add(1);
+                        }
+                        KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            self.inputs[self.selected_input].bytes[self.edit_cursor] =
+                                self.inputs[self.selected_input].bytes[self.edit_cursor]
+                                    .saturating_sub(1);
+                        }
+                        KeyCode::Left => {
+                            if self.digit_cursor > 0 {
+                                self.digit_cursor -= 1;
+                            }
+                        }
+                        KeyCode::Right => {
+                            let max = match mode {
+                                Mode::EditAscii => 0,
+                                Mode::EditDec => 2,
+                                Mode::EditHex => 1,
+                                _ => panic!("Invalid mode for left cursor movement"),
+                            };
+                            if self.digit_cursor < max {
+                                self.digit_cursor += 1;
+                            }
+                        }
+                        KeyCode::Up => {
+                            self.digit_cursor = 0;
+                        }
+                        KeyCode::Down => {
+                            self.digit_cursor = match mode {
+                                Mode::EditAscii => 0,
+                                Mode::EditDec => 2,
+                                Mode::EditHex => 1,
+                                _ => panic!("Invalid mode for down cursor movement"),
+                            };
+                        }
+
+                        KeyCode::Esc => self.mode = Mode::Normal,
+                        _ => {}
+                    },
+                    Mode::Running => {
+                        self.mode = Mode::Normal;
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+
+fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<bool, Box<dyn Error>> {
+    loop {
+        terminal.draw(|f| app.draw(f))?;
+        if event::poll(std::time::Duration::from_millis(250))? 
+        && !app.handle_event(event::read()?) {
+            return Ok(false);
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    enable_raw_mode()?;
+    let mut stderr = io::stderr();
+    execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stderr);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = App::new();
+    let res = run_app(&mut terminal, &mut app);
+
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    if let Ok(do_print) = res {
+        if do_print {
+            // Optionally print results here
+        }
+    } else if let Err(err) = res {
+        println!("{err:?}");
     }
 
     Ok(())
-}
-
-fn find_program(target_output: &[u8], starting_program: String) -> Result<Vec<BfInstruction>> {
-    //parse the starting program
-    let starting_program = CompressedBF::from_string(starting_program);
-
-    let mut current_program_size = starting_program.size();
-    let mut current_program_writing_head = DiskSeedWriter::new(current_program_size);
-
-    // calculate and check paren_count
-    let mut paren_count = 0;
-    for instruction in starting_program.iter() {
-        match instruction {
-            BfInstruction::LoopStart => paren_count += 1,
-            BfInstruction::LoopEnd => paren_count -= 1,
-            _ => {}
-        }
-    }
-    if paren_count != 0 {
-        bail!("Starting program has unmatched parentheses.");
-    }
-
-    // construct the jump table
-    let mut jump_table = Vec::with_capacity(starting_program.size() + 1);
-    for i in 0..starting_program.size() {
-        match starting_program.get(i) {
-            Some(BfInstruction::LoopStart) => jump_table.push(-2), // -2 indicates start of loop
-            Some(BfInstruction::LoopEnd) => {
-                //find the last -2 in the jump table and set it to the current index + 1 and append the index of the loop start + 1
-                if let Some(loop_start_index) = jump_table.iter().rposition(|&x| x == -2) {
-                    jump_table[loop_start_index] = i as i64 + 1; // set the loop start to the current index + 1
-                    jump_table.push((loop_start_index + 1) as i64); // append the index of the loop start + 1
-                } else {
-                    bail!("Loop end without matching loop start.");
-                }
-            }
-            _ => jump_table.push(-1), // -1 indicates non-loop instruction
-        }
-    }
-
-    // construct RunningProgramInfo for the starting program
-    let starting_program_info = RunningProgramInfo {
-        code: starting_program.clone(),
-        current_paren_count: 0,
-        jump_table,
-        continue_state: ContinueState {
-            program_state: ProgramState {
-                tape: [0u8; MAX_TAPE_SIZE],
-                tape_head: 0,
-            },
-            resume_pc: 0,
-            resume_output_ind: 0,
-        },
-    };
-
-    //run initial program
-    let initial_program_run_result = run_program_fragment(&starting_program_info, target_output);
-    println!("Program run result: {:?}", initial_program_run_result);
-    let mut found_states = HashSet::with_capacity_and_hasher(5_000_000, RandomState::default());
-
-    handle_run_result(
-        initial_program_run_result,
-        starting_program_info,
-        &mut current_program_writing_head,
-        &mut found_states,
-    );
-
-    current_program_writing_head.flush();
-
-    let mut current_program_reading_head;
-
-    loop {
-        current_program_writing_head.flush();
-        current_program_writing_head = DiskSeedWriter::new(current_program_size + 1);
-        current_program_reading_head = DiskSeedReader::new(current_program_size);
-
-        current_program_size += 1;
-
-        // if current_program_size == 12 {
-        //     return vec![];
-        // }
-
-        while let Some(program_seed) = current_program_reading_head.read_seed() {
-            if (program_seed.code.size() == 0
-                || program_seed.code.get(program_seed.code.size() - 1)
-                    != Some(BfInstruction::LoopStart))
-                && (program_seed.current_paren_count > 0)
-            {
-                //loop end instruction
-                let mut new_program = program_seed.clone();
-                new_program.code.append(BfInstruction::LoopEnd);
-
-                //add the newly completed loop into the jump table
-                let loop_start_loc = program_seed
-                    .jump_table
-                    .iter()
-                    .rposition(|x| *x == -2)
-                    .unwrap();
-                new_program.jump_table[loop_start_loc] = new_program.code.size() as i64;
-                new_program.jump_table.push((loop_start_loc + 1) as i64);
-                new_program.current_paren_count -= 1;
-
-                let run_res = run_program_fragment_without_states(&new_program, target_output);
-                if let Some(working_program) = handle_run_result(
-                    run_res,
-                    new_program,
-                    &mut current_program_writing_head,
-                    &mut found_states,
-                ) {
-                    return Ok(working_program);
-                }
-            }
-            //loop start instruction
-            {
-                let mut new_program = program_seed.clone();
-                new_program.code.append(BfInstruction::LoopStart);
-                new_program.current_paren_count += 1;
-                //add a -2 to the jump table to mark the start of the loop
-                new_program.jump_table.push(-2);
-                let run_res = run_program_fragment_without_states(&new_program, target_output);
-                if let Some(working_program) = handle_run_result(
-                    run_res,
-                    new_program,
-                    &mut current_program_writing_head,
-                    &mut found_states,
-                ) {
-                    return Ok(working_program);
-                }
-            }
-            //output instruction
-            {
-                let mut new_program = program_seed.clone();
-                new_program.code.append(BfInstruction::Output);
-                new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment_without_states(&new_program, target_output);
-                if let Some(working_program) = handle_run_result(
-                    run_res,
-                    new_program,
-                    &mut current_program_writing_head,
-                    &mut found_states,
-                ) {
-                    return Ok(working_program);
-                }
-            }
-            //left instruction
-            if program_seed.code.size() == 0
-                || program_seed.code.get(program_seed.code.size() - 1) != Some(BfInstruction::Right)
-            {
-                let mut new_program = program_seed.clone();
-                new_program.code.append(BfInstruction::Left);
-                new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment_without_states(&new_program, target_output);
-                if let Some(working_program) = handle_run_result(
-                    run_res,
-                    new_program,
-                    &mut current_program_writing_head,
-                    &mut found_states,
-                ) {
-                    return Ok(working_program);
-                }
-            }
-            //right instruction
-            if program_seed.code.size() == 0
-                || program_seed.code.get(program_seed.code.size() - 1) != Some(BfInstruction::Left)
-            {
-                let mut new_program = program_seed.clone();
-                new_program.code.append(BfInstruction::Right);
-                new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment_without_states(&new_program, target_output);
-                if let Some(working_program) = handle_run_result(
-                    run_res,
-                    new_program,
-                    &mut current_program_writing_head,
-                    &mut found_states,
-                ) {
-                    return Ok(working_program);
-                }
-            }
-            //increment instruction
-            if program_seed.code.size() == 0
-                || program_seed.code.get(program_seed.code.size() - 1) != Some(BfInstruction::Dec)
-            {
-                let mut new_program = program_seed.clone();
-                new_program.code.append(BfInstruction::Inc);
-                new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment_without_states(&new_program, target_output);
-                if let Some(working_program) = handle_run_result(
-                    run_res,
-                    new_program,
-                    &mut current_program_writing_head,
-                    &mut found_states,
-                ) {
-                    return Ok(working_program);
-                }
-            }
-            //decrement instruction
-            if program_seed.code.size() == 0
-                || program_seed.code.get(program_seed.code.size() - 1) != Some(BfInstruction::Inc)
-            {
-                let mut new_program = program_seed.clone();
-                new_program.code.append(BfInstruction::Dec);
-                new_program.jump_table.push(-1); // -1 indicates non-loop instruction
-                let run_res = run_program_fragment_without_states(&new_program, target_output);
-                if let Some(working_program) = handle_run_result(
-                    run_res,
-                    new_program,
-                    &mut current_program_writing_head,
-                    &mut found_states,
-                ) {
-                    return Ok(working_program);
-                }
-            }
-        }
-        current_program_writing_head.flush();
-
-        println!(
-            "Finished processing all programs of size {}. Max steps reached: {}",
-            current_program_size - 1,
-            get_max_steps_reached()
-        );
-
-        if current_program_size == 16 {
-            return Err(eyre!("Reached maximum program size of 16 without finding a solution."));
-        }
-
-        println!(
-            "Advanced to next layer of program size of {}.",
-            current_program_size
-        );
-
-        //debug write all of the current programs to file and their jump table, code, and continue state to a file
-        // let file_name = format!("program_{}.bf", program_seeds.iter().last().unwrap().code.size());
-        // let mut file = std::fs::File::create(file_name).expect("Could not create file");
-        // for program_seed in program_seeds.iter() {
-        //     let code_str = program_seed.code.to_string();
-        //     let jump_table_strs = program_seed.jump_table.iter()
-        //         .map(|x| x.to_string())
-        //         .collect::<Vec<String>>();
-        //     let continue_state_str = if let Some(real_continue_state) = &program_seed.continue_state { format!(
-        //         "Tape: {:?}, Tape Head: {}, pc: {}",
-        //         real_continue_state.0.tape,
-        //         real_continue_state.0.tape_head,
-        //         real_continue_state.1
-        //     )} else {
-        //         "No continue state".to_string()
-        //     };
-        //
-        //     //output the code with 2 spaces in between each instruction
-        //     //outupt the jump table under it aligned with the code
-        //     //finally output the continue state
-        //     for char in code_str.chars() {
-        //         if char != ' ' {
-        //             file.write_all(format!("{}  ", char).as_bytes()).expect("Could not write to file");
-        //         }
-        //     }
-        //     file.write_all(b"\n").expect("Could not write to file");
-        //     //make sure that each jump table entry is 3 characters wide
-        //     for jump in jump_table_strs {
-        //         file.write_all(format!("{:>3}", jump).as_bytes()).expect("Could not write to file");
-        //     }
-        //     file.write_all(b"\n").expect("Could not write to file");
-        //     file.write_all(continue_state_str.as_bytes()).expect("Could not write to file");
-        //     file.write_all(b"\n").expect("Could not write to file");
-        // }
-        //debug print the number of programs
-    }
-
-}
-
-fn handle_run_result(
-    run_res: BfRunResult,
-    mut new_program: RunningProgramInfo,
-    new_programs: &mut DiskSeedWriter,
-    found_states: &mut HashSet<(ProgramState, usize), RandomState>,
-) -> Option<Vec<BfInstruction>> {
-    match run_res {
-        BfRunResult::IncompleteLoopSuccess(continue_state) => {
-            new_program.continue_state = continue_state;
-            new_programs.append(new_program.clone());
-            None
-        }
-        BfRunResult::Success => Some(new_program.code.to_vec()),
-        BfRunResult::IncompleteOutputSuccess(end_state) => {
-            if found_states
-                .contains(&(end_state.program_state.clone(), end_state.resume_output_ind))
-            {
-                return None; // Skip already found state
-            } else {
-                found_states.insert((end_state.program_state.clone(), end_state.resume_output_ind));
-                // println!("total found states: {}", found_states.len());
-            }
-            new_program.continue_state = end_state;
-            new_programs.append(new_program.clone());
-            None
-        }
-        _ => None,
-    }
-}
-
-pub struct DiskSeedWriter {
-    sender: Option<Sender<RunningProgramInfo>>,
-    handle: Option<JoinHandle<()>>,
-    file: Arc<Mutex<BufWriter<File>>>,
-    program_size: usize,
-    _phantom: PhantomData<()>,
-}
-
-impl DiskSeedWriter {
-    pub fn new(program_size: usize) -> Self {
-        let file_path = format!("program_seeds_{}.bin", program_size);
-        let file = match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(file_path)
-        {
-            Ok(file) => file,
-            Err(err) => {
-                panic!("Could not open file for writing: {}", err);
-            }
-        };
-
-        let mut file = BufWriter::with_capacity(1_000_000_000, file);
-        file.write(&program_size.to_ne_bytes()).unwrap();
-
-        let file = Arc::new(Mutex::new(file));
-        let (sender, receiver) = mpsc::channel::<RunningProgramInfo>();
-        let file_clone = Arc::clone(&file);
-
-        let handle = thread::spawn(move || {
-            for program in receiver {
-                let mut file = file_clone.lock().unwrap();
-
-                // write code
-                let code_bytes = program
-                    .code
-                    .to_vec()
-                    .iter()
-                    .map(|b| (*b).to_u8())
-                    .collect::<Vec<u8>>();
-                file.write_all(&code_bytes)
-                    .expect("Could not write program code");
-
-                // write jump table
-                let jump_table_bytes = program
-                    .jump_table
-                    .iter()
-                    .map(|&x| x.to_ne_bytes())
-                    .flatten()
-                    .collect::<Vec<u8>>();
-                file.write_all(&jump_table_bytes)
-                    .expect("Could not write jump table");
-
-                file.write_all(&program.continue_state.program_state.tape)
-                    .expect("Could not write tape");
-                file.write_all(&[program.continue_state.program_state.tape_head])
-                    .expect("Could not write tape head");
-                file.write_all(&program.continue_state.resume_pc.to_ne_bytes())
-                    .expect("Could not write pc");
-                file.write_all(&program.continue_state.resume_output_ind.to_ne_bytes())
-                    .expect("Could not write output index");
-
-                // write paren count
-                file.write_all(&program.current_paren_count.to_ne_bytes())
-                    .expect("Could not write paren count");
-            }
-        });
-
-        DiskSeedWriter {
-            sender: Some(sender),
-            handle: Some(handle),
-            file,
-            program_size,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn append(&mut self, program: RunningProgramInfo) {
-        if program.code.size() != self.program_size {
-            panic!(
-                "Program size mismatch: {} != {}",
-                program.code.size(),
-                self.program_size
-            );
-        }
-
-        if let Some(sender) = &self.sender {
-            sender
-                .send(program)
-                .expect("Failed to send program to worker thread");
-        }
-    }
-
-    pub fn flush(&mut self) {
-        // Drop sender so the worker thread knows there’s nothing more
-        self.sender.take();
-        if let Some(handle) = self.handle.take() {
-            handle.join().expect("Failed to join worker thread of DiskSeedWriter");
-        }
-
-        let mut file = self.file.lock().unwrap();
-        file.flush().expect("Failed to flush file");
-    }
-}
-
-pub struct DiskSeedReader {
-    file: BufReader<File>,
-    program_size: usize,
-}
-
-impl DiskSeedReader {
-    pub fn new(program_size: usize) -> Self {
-        //make sure the file exists
-        let file_path = format!("program_seeds_{}.bin", program_size);
-        let file = OpenOptions::new()
-            .read(true)
-            .open(file_path)
-            .expect("Could not open file for reading");
-        let mut file = BufReader::with_capacity(1_000_000_000, file);
-
-        let mut size_bytes = [0u8; usize::to_ne_bytes(0).len()];
-        file.read_exact(&mut size_bytes)
-            .expect("Could not read program size from file");
-        let program_size = usize::from_ne_bytes(size_bytes);
-        if program_size != program_size {
-            panic!(
-                "Program size does not match expected size: {} != {}",
-                program_size, program_size
-            );
-        }
-
-        DiskSeedReader { file, program_size }
-    }
-
-    pub fn read_seed(&mut self) -> Option<RunningProgramInfo> {
-        let mut code = CompressedBF::new(self.program_size, self.program_size + 1);
-        let mut jump_table = Vec::with_capacity(self.program_size + 1);
-
-        // Read program code
-        let mut code_bytes = vec![0u8; self.program_size];
-        if self.file.read_exact(&mut code_bytes).is_err() {
-            return None; // End of file or read error
-        }
-        for (i, byte) in code_bytes.iter().enumerate() {
-            if let Some(instruction) = BfInstruction::from_u8(*byte) {
-                code.set(i, instruction);
-            } else {
-                return None; // Invalid instruction
-            }
-        }
-
-        // Read jump table
-        let jump_table_size = self.program_size;
-        //read jump_table_size * sizeof(i64) bytes
-        let mut jump_table_bytes = vec![0u8; jump_table_size * std::mem::size_of::<i64>()];
-        if self.file.read_exact(&mut jump_table_bytes).is_err() {
-            return None; // End of file or read error
-        }
-        for i in 0..jump_table_size {
-            let start = i * std::mem::size_of::<i64>();
-            let end = start + std::mem::size_of::<i64>();
-            let jump_value = i64::from_ne_bytes(jump_table_bytes[start..end].try_into().unwrap());
-            jump_table.push(jump_value);
-        }
-
-        //read the MAX_TAPE_SIZE bytes of tape
-        let mut tape = [0u8; MAX_TAPE_SIZE];
-        if self.file.read_exact(&mut tape).is_err() {
-            return None; // End of file or read error
-        }
-        //read the tape head
-        let mut tape_head_bytes = [0u8; 1];
-        if self.file.read_exact(&mut tape_head_bytes).is_err() {
-            return None; // End of file or read error
-        }
-        let tape_head = tape_head_bytes[0];
-
-        //read the program counter
-        let mut pc_bytes = [0u8; std::mem::size_of::<usize>()];
-        if self.file.read_exact(&mut pc_bytes).is_err() {
-            return None; // End of file or read error
-        }
-        let pc = usize::from_ne_bytes(pc_bytes);
-
-        // Read the output index
-        let mut output_index_bytes = [0u8; std::mem::size_of::<usize>()];
-        if self.file.read_exact(&mut output_index_bytes).is_err() {
-            return None; // End of file or read error
-        }
-        let output_index = usize::from_ne_bytes(output_index_bytes);
-
-        let continue_state = ContinueState {
-            program_state: ProgramState { tape, tape_head },
-            resume_pc: pc,
-            resume_output_ind: output_index,
-        };
-
-        // Read paren count
-        let mut paren_count_bytes = [0u8; std::mem::size_of::<usize>()];
-        if self.file.read_exact(&mut paren_count_bytes).is_err() {
-            return None; // End of file or read error
-        }
-        let current_paren_count = usize::from_ne_bytes(paren_count_bytes);
-
-        Some(RunningProgramInfo {
-            code,
-            jump_table,
-            continue_state,
-            current_paren_count,
-        })
-    }
 }

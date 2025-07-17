@@ -86,7 +86,10 @@ impl CompressedBF {
 impl CompressedBF {
     pub fn new(size: usize, capacity: usize) -> CompressedBF {
         if capacity < size {
-            panic!("Capacity of {} must be greater than or equal to size {}", capacity, size);
+            panic!(
+                "Capacity of {} must be greater than or equal to size {}",
+                capacity, size
+            );
         }
         let required_bytes = (capacity + 1) / 2;
         CompressedBF {
