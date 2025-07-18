@@ -584,7 +584,7 @@ impl App {
 
 pub fn run_app<T: RawTerminal>(terminal: &mut T, app: &mut App) -> Result<bool, Box<dyn Error>> {
     loop {
-        terminal.draw(Box::new(|f| app.draw(f)))?;
+        terminal.draw(|f| app.draw(f))?;
         if event::poll(std::time::Duration::from_millis(250))?
             && !app.handle_event(event::read()?)
         {

@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand, Args, ValueEnum};
 use std::fs;
 
-use brainfuck_tui::{run_app, App};
+use brainfuck_tui::{run_app, App, CrosstermTerminal};
 
 /// CLI for processing and searching inputs
 #[derive(Parser)]
@@ -83,8 +83,10 @@ fn main() {
             search_handler(&input, args.format, args.multithread);
         }
         Commands::Tui => {
-            let app = App::new();
-            run_app(terminal, app)
+            let mut terminal = CrosstermTerminal::new().expect("Failed to create terminal");
+            let mut app = App::new();
+            run_app(&mut terminal, &mut app).expect("Failed to run TUI app");
+            terminal.try_close().expect("Failed to close terminal");
         }
     }
 }
