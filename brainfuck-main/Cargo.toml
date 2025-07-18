@@ -1,0 +1,20 @@
+[package]
+name = "brainfuck-main"
+version = "0.1.0"
+edition = "2024"
+authors = ["Nathan Gerow <ngerow12025@gmail.com>"]
+description = "Front end CLI for running and finding Brainfuck programs."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ngerow2025/BrainF-ck_Gen"
+keywords = ["brainfuck", "interpreter", "virtual-machine", "cli", "tui"]
+categories = ["compilers"]
+readme = "README.md"
+
+[[bin]]
+name = "brainfuck-main"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.41", features = ["derive"] }
+brainfuck-core = { path = "../brainfuck-core" }
+brainfuck-tui = { path = "../brainfuck-tui" }

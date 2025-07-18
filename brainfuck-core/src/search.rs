@@ -1,21 +1,8 @@
-// fn main() -> Result<()> {
-//     // initialize color_eyre’s handler
-//     color_eyre::install()?;
+use std::{fs::{File, OpenOptions}, io::{BufReader, BufWriter, Read, Write}, sync::{mpsc::{self, Sender}, Arc, Mutex}, thread::{self, JoinHandle}};
 
-//     let target_output: &[u8] = &[15u8]; // Example target output
+use ahash::{HashSet, RandomState};
 
-//     //+++[>+++++<-]<.
-//     let program = find_program(target_output, "".to_string())?;
-
-//     if program.is_empty() {
-//         println!("No program found to produce the target output.");
-//     } else {
-//         println!("Found program: {:?}", program);
-//         // Optionally, you can write the program to a file or execute it.
-//     }
-
-//     Ok(())
-// }
+use crate::{data::{BfInstruction, CompressedBF}, run::{get_max_steps_reached, run_program_fragment, run_program_fragment_without_states, BfRunResult, ContinueState, ProgramState, RunningProgramInfo}, MAX_TAPE_SIZE};
 
 
 
@@ -292,7 +279,7 @@ fn handle_run_result(
     run_res: BfRunResult,
     mut new_program: RunningProgramInfo,
     new_programs: &mut DiskSeedWriter,
-    found_states: &mut HashSet<(ProgramState, usize), RandomState>,
+    found_states: &mut HashSet<(ProgramState, usize)>,
 ) -> Option<Vec<BfInstruction>> {
     match run_res {
         BfRunResult::IncompleteLoopSuccess(continue_state) => {
@@ -323,7 +310,6 @@ pub struct DiskSeedWriter {
     handle: Option<JoinHandle<()>>,
     file: Arc<Mutex<BufWriter<File>>>,
     program_size: usize,
-    _phantom: PhantomData<()>,
 }
 
 impl DiskSeedWriter {
@@ -392,7 +378,6 @@ impl DiskSeedWriter {
             handle: Some(handle),
             file,
             program_size,
-            _phantom: PhantomData,
         }
     }
 

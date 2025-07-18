@@ -1,0 +1,32 @@
+[package]
+name = "brainfuck-core"
+version = "0.1.0"
+edition = "2024"
+authors = ["Nathan Gerow <ngerow12025@gmail.com>"]
+description = "Core execution engine, data structures, and program search for Brainfuck programs."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ngerow2025/BrainF-ck_Gen"
+keywords = ["brainfuck", "interpreter", "language", "virtual-machine"]
+categories = ["compilers"]
+readme = "README.md"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+serde-support = ["serde"]
+parallel = ["rayon"]
+logging = ["tracing"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+panic = "abort"
+
+[dependencies]
+ahash = "0.8.12"
+rayon = { version = "1.10.0", optional = true }
+serde = { version = "1.0.219", optional = true, features = ["derive"] }
+tracing = { version = "0.1.41", optional = true }

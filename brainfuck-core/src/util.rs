@@ -1,0 +1,1 @@
+//convience functions to hide implemtation details better

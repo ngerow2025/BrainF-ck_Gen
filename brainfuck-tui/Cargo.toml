@@ -1,0 +1,24 @@
+[package]
+name = "brainfuck-tui"
+version = "0.1.0"
+edition = "2024"
+authors = ["Nathan Gerow <ngerow12025@gmail.com>"]
+description = "Terminal user interface for generating Brainfuck programs."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ngerow2025/BrainF-ck_Gen"
+keywords = ["brainfuck", "interpreter", "language", "virtual-machine", "tui"]
+categories = ["compilers"]
+readme = "README.md"
+
+
+[lib]
+name = "brainfuck_tui"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "brainfuck-tui-standalone"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29.0"
+tui-scrollview = "0.5.1"

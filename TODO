@@ -1,2 +1,49 @@
 look at smallvec to get rid of heap allocation, they are destroying performance in the hot path
 add additional logic for jump tables to handle repeated loop closes and starts better
+review public APIs:
+- core
+- tui
+- main
+add tests to:
+- core jump tables
+- core continue states
+- core searching
+- core data structures
+- tui input handling
+add fuzzing(cargo-fuzz, proptest) for:
+- core execution
+- jump table generation
+- tui inputs
+- main cli
+add benchmarks for:
+- core execution
+- jump table generation
+- core searching
+add logging with tracing for
+- core
+- tui
+- main
+add logging, tracing, telemetry, benchmarking from tracing crate
+thread core
+add docs:
+- core
+- tui
+- main
+add docs examples and tests:
+- core
+- tui
+- main
+add examples:
+- core
+add integration/end-to-end tests
+add custom error types and messages:
+- core
+- tui
+- main
+add CI
+- clippy lint
+- fmt
+- tests - multiple targets
+- benchmarks
+- test coverage
+- MSRV

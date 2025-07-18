@@ -1,29 +1,13 @@
 use core::panic;
-use crossterm::event::{self, KeyEventKind, KeyModifiers};
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Paragraph};
-
 use std::error::Error;
-use std::io;
 
-use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, KeyCode},
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
-    layout::{Constraint, Layout},
-    style::{Color, Modifier, Style},
-    widgets::{Borders, Wrap},
-};
-
-use crossterm::event::Event as CEvent;
+use ratatui::crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::*;
-use ratatui::widgets::*;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Text};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::{Frame, Terminal};
 use tui_scrollview::{ScrollView, ScrollViewState};
 
 #[derive(Default, Clone, Debug)]
@@ -41,7 +25,7 @@ enum Mode {
 }
 
 #[derive(Debug)]
-struct App {
+pub struct App {
     inputs: Vec<InputEntry>,
     selected_input: usize,
     mode: Mode,
@@ -66,7 +50,7 @@ enum Direction {
 }
 
 impl App {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             inputs: vec![InputEntry {
                 bytes: vec![0u8; 4],
@@ -596,7 +580,7 @@ impl App {
     }
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<bool, Box<dyn Error>> {
+pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<bool, Box<dyn Error>> {
     loop {
         terminal.draw(|f| app.draw(f))?;
         if event::poll(std::time::Duration::from_millis(250))? 
@@ -606,31 +590,3 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<bool
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    enable_raw_mode()?;
-    let mut stderr = io::stderr();
-    execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stderr);
-    let mut terminal = Terminal::new(backend)?;
-
-    let mut app = App::new();
-    let res = run_app(&mut terminal, &mut app);
-
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-
-    if let Ok(do_print) = res {
-        if do_print {
-            // Optionally print results here
-        }
-    } else if let Err(err) = res {
-        println!("{err:?}");
-    }
-
-    Ok(())
-}
