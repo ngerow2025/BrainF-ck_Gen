@@ -84,6 +84,7 @@ fn main() {
         }
         Commands::Tui => {
             let app = App::new();
+            run_app(terminal, app)
         }
     }
 }

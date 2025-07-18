@@ -10,6 +10,8 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use tui_scrollview::{ScrollView, ScrollViewState};
 
+use crate::raw_terminal::RawTerminal;
+
 #[derive(Default, Clone, Debug)]
 struct InputEntry {
     bytes: Vec<u8>,
@@ -580,11 +582,12 @@ impl App {
     }
 }
 
-pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<bool, Box<dyn Error>> {
+pub fn run_app<T: RawTerminal>(terminal: &mut T, app: &mut App) -> Result<bool, Box<dyn Error>> {
     loop {
-        terminal.draw(|f| app.draw(f))?;
-        if event::poll(std::time::Duration::from_millis(250))? 
-        && !app.handle_event(event::read()?) {
+        terminal.draw(Box::new(|f| app.draw(f)))?;
+        if event::poll(std::time::Duration::from_millis(250))?
+            && !app.handle_event(event::read()?)
+        {
             return Ok(false);
         }
     }

@@ -1,6 +1,6 @@
 use std::{error::Error, io};
 
-use brainfuck_tui::{run_app, App};
+use brainfuck_tui::{run_app, App, CrosstermTerminal};
 use ratatui::{
     crossterm::{
         event::{DisableMouseCapture, EnableMouseCapture},
@@ -16,22 +16,12 @@ use ratatui::{
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
-    enable_raw_mode()?;
-    let mut stderr = io::stderr();
-    execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stderr);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = CrosstermTerminal::new()?;
 
     let mut app = App::new();
     let res = run_app(&mut terminal, &mut app);
 
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+    terminal.try_close()?;
 
     res.map(|_| ())
 }
