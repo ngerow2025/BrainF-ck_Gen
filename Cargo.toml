@@ -1,14 +1,4 @@
-# [package]
-# name = "bf_opt"
-# version = "0.1.0"
-# edition = "2024"
 
-# [dependencies]
-# ahash = "0.8.12"
-# color-eyre = "0.6.5"
-# crossterm = "0.29.0"
-# ratatui = "0.29.0"
-# tui-scrollview = "0.5.1"
 
 [workspace]
 resolver = "3"
@@ -17,3 +7,4 @@ members = [
     "brainfuck-tui",
     "brainfuck-main",
 ]
+default-members = ["brainfuck-main"]
