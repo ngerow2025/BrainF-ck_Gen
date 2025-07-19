@@ -62,10 +62,9 @@ impl CompressedBF {
 }
 
 impl CompressedBF {
-    pub(crate) fn from_string(p0: String) -> CompressedBF {
-        let size = p0.len();
+    pub(crate) fn from_string<T: AsRef<str>>(p0: T) -> CompressedBF {
         let mut bf = CompressedBF::new(0, 0);
-        for c in p0.chars() {
+        for c in p0.as_ref().chars() {
             let instruction = match c {
                 '+' => BfInstruction::Inc,
                 '-' => BfInstruction::Dec,

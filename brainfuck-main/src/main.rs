@@ -1,3 +1,4 @@
+use brainfuck_core::{run_program_fragment_no_target, util::preprocess_input};
 use clap::{Parser, Subcommand, Args, ValueEnum};
 use std::fs;
 
@@ -13,7 +14,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run input through the processor
+    /// Run input through the Brainfuck interpreter.
+    ///
+    /// This uses all optimizations including jump tables, therefore requiring a full preprocessing pass of the input.
+    /// Default memory size is 30,000 cells, does not automatically resize, and throws errors if the program attempts to move pointer out of bounds in either direction.
     Run(RunArgs),
 
     /// Search input for a pattern
@@ -71,7 +75,7 @@ fn main() {
                     fs::read_to_string(args.file.expect("Expected file")).expect("Failed to read file")
                 }
             };
-            run_handler(&input);
+            run_code(&input);
         }
         Commands::Search(args) => {
             let input = match args.target {
@@ -91,9 +95,18 @@ fn main() {
     }
 }
 
-fn run_handler(input: &str) {
-    println!("Running with input:\n{}", input);
-    // Your actual logic here
+fn run_code(input: &str) {
+    let preprocessed_code = preprocess_input(input);
+    match preprocessed_code {
+        Ok(running_program_info) => {
+            run_program_fragment_no_target(&running_program_info, || None, |output| {
+                print!("{}", output as char);
+            });
+        }
+        Err(e) => {
+            eprintln!("Error preprocessing input: {}", e);
+        }
+    }
 }
 
 fn search_handler(input: &str, format: InputFormat, multithread: bool) {
