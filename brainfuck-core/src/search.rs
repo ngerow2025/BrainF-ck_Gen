@@ -275,11 +275,11 @@ fn find_program(
     }
 }
 
-fn handle_run_result(
-    run_res: BfRunResult,
-    mut new_program: RunningProgramInfo,
-    new_programs: &mut DiskSeedWriter,
-    found_states: &mut HashSet<(ProgramState, usize)>,
+fn handle_run_result<const MAX_TAPE_SIZE: usize>(
+    run_res: BfRunResult<MAX_TAPE_SIZE>,
+    mut new_program: RunningProgramInfo<MAX_TAPE_SIZE>,
+    new_programs: &mut DiskSeedWriter<MAX_TAPE_SIZE>,
+    found_states: &mut HashSet<(ProgramState<MAX_TAPE_SIZE>, usize)>,
 ) -> Option<Vec<BfInstruction>> {
     match run_res {
         BfRunResult::IncompleteLoopSuccess(continue_state) => {
@@ -305,16 +305,16 @@ fn handle_run_result(
     }
 }
 
-pub struct DiskSeedWriter {
-    sender: Option<Sender<RunningProgramInfo>>,
+pub struct DiskSeedWriter<const MAX_TAPE_SIZE: usize> {
+    sender: Option<Sender<RunningProgramInfo<MAX_TAPE_SIZE>>>,
     handle: Option<JoinHandle<()>>,
     file: Arc<Mutex<BufWriter<File>>>,
     program_size: usize,
 }
 
-impl DiskSeedWriter {
+impl<const MAX_TAPE_SIZE: usize> DiskSeedWriter<MAX_TAPE_SIZE> {
     pub fn new(program_size: usize) -> Self {
-        let file_path = format!("program_seeds_{}.bin", program_size);
+        let file_path = format!("program_{}_seeds_{}.bin", MAX_TAPE_SIZE, program_size);
         let file = match OpenOptions::new()
             .write(true)
             .create(true)
@@ -331,7 +331,7 @@ impl DiskSeedWriter {
         file.write(&program_size.to_ne_bytes()).unwrap();
 
         let file = Arc::new(Mutex::new(file));
-        let (sender, receiver) = mpsc::channel::<RunningProgramInfo>();
+        let (sender, receiver) = mpsc::channel::<RunningProgramInfo<MAX_TAPE_SIZE>>();
         let file_clone = Arc::clone(&file);
 
         let handle = thread::spawn(move || {
@@ -381,7 +381,7 @@ impl DiskSeedWriter {
         }
     }
 
-    pub fn append(&mut self, program: RunningProgramInfo) {
+    pub fn append(&mut self, program: RunningProgramInfo<MAX_TAPE_SIZE>) {
         if program.code.size() != self.program_size {
             panic!(
                 "Program size mismatch: {} != {}",
@@ -440,7 +440,7 @@ impl DiskSeedReader {
         DiskSeedReader { file, program_size }
     }
 
-    pub fn read_seed(&mut self) -> Option<RunningProgramInfo> {
+    pub fn read_seed(&mut self) -> Option<RunningProgramInfo<MAX_TAPE_SIZE>> {
         let mut code = CompressedBF::new(self.program_size, self.program_size + 1);
         let mut jump_table = Vec::with_capacity(self.program_size + 1);
 

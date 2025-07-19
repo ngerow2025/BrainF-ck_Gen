@@ -1,42 +1,43 @@
 use crate::data::{BfInstruction, CompressedBF};
-use crate::{MAX_TAPE_SIZE, run};
-use ahash::RandomState;
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::any::Any;
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
+use lazy_static::lazy_static;
+
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum BfRunResult {
+pub enum BfRunResult<const MAX_TAPE_SIZE: usize> {
     NOOPError,
     TargetMismatchError,
     TapeHeadBoundError,
     OOMError,
     InfiniteLoopError,
     InputTokenError,
-    IncompleteLoopSuccess(ContinueState),
-    IncompleteOutputSuccess(ContinueState),
+    IncompleteLoopSuccess(ContinueState<MAX_TAPE_SIZE>),
+    IncompleteOutputSuccess(ContinueState<MAX_TAPE_SIZE>),
     Success,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ContinueState {
-    pub(crate) program_state: ProgramState,
+pub struct ContinueState<const MAX_TAPE_SIZE: usize> {
+    pub(crate) program_state: ProgramState<MAX_TAPE_SIZE>,
     pub(crate) resume_pc: usize,
     pub(crate) resume_output_ind: usize,
 }
 
 #[derive(Debug)]
-pub struct RunningProgramInfo {
+pub struct RunningProgramInfo<const MAX_TAPE_SIZE: usize> {
     pub(crate) code: CompressedBF,
     pub(crate) current_paren_count: usize,
     pub(crate) jump_table: Vec<i64>,
-    pub(crate) continue_state: ContinueState,
+    pub(crate) continue_state: ContinueState<MAX_TAPE_SIZE>,
 }
 
 //make sure to keep same vector capacity for Vec in order to save a lot of time on memory operations
-impl Clone for RunningProgramInfo {
+impl<const MAX_TAPE_SIZE: usize> Clone for RunningProgramInfo<MAX_TAPE_SIZE> {
     fn clone(&self) -> Self {
         let mut new_jump_table = Vec::with_capacity(self.jump_table.capacity());
         new_jump_table.extend_from_slice(&self.jump_table);
@@ -50,24 +51,45 @@ impl Clone for RunningProgramInfo {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct ProgramState {
+pub struct ProgramState<const MAX_TAPE_SIZE: usize> {
     pub(crate) tape: [u8; MAX_TAPE_SIZE],
     pub(crate) tape_head: u8,
 }
 
 pub static HASHSET_SIZE_HISTOGRAM: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
 
-thread_local! {
-    static STATE_TRACKER_GLOBAL: RefCell<Vec<HashSet<ProgramState, RandomState>>> = RefCell::new(vec![]);
+
+lazy_static! {
+    static ref GLOBAL: Mutex<HashMap<usize, Box<dyn Any + Send + Sync>>> =
+        Mutex::new(HashMap::new());
+}
+
+
+fn get_state_tracker<const MAX_TAPE_SIZE: usize>() -> Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>> {
+    let mut global = GLOBAL.lock().unwrap();
+    let entry = global.entry(MAX_TAPE_SIZE).or_insert_with(|| {
+        Box::new(HashMap::<ThreadId, Arc<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>::new())
+            as Box<dyn Any + Send + Sync>
+    });
+
+    // Downcast to the correct type
+    let map = entry.downcast_mut::<HashMap<ThreadId, Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>>>().unwrap();
+
+    let thread_id = std::thread::current().id();
+    map.entry(thread_id)
+        .or_insert_with(|| Arc::new(Mutex::new(Vec::new())))
+        .clone()
 }
 
 const SHRINK_TO_SIZE: usize = 2147483649;
 
-pub fn run_program_fragment(
-    program_fragment: &RunningProgramInfo,
+pub fn run_program_fragment<const MAX_TAPE_SIZE: usize>(
+    program_fragment: &RunningProgramInfo<MAX_TAPE_SIZE>,
     target_output: &[u8],
-) -> BfRunResult {
-    STATE_TRACKER_GLOBAL.with_borrow_mut(|state_tracker| {
+) -> BfRunResult<MAX_TAPE_SIZE> {
+    let state_tracker_arc_mutex = get_state_tracker::<MAX_TAPE_SIZE>();
+    let mut state_tracker = state_tracker_arc_mutex.lock().unwrap();
+    {
         //clear the state tracker for this thread
         for state in state_tracker.iter_mut() {
             state.clear();
@@ -76,7 +98,7 @@ pub fn run_program_fragment(
         // Ensure the state tracker has enough elements
         if state_tracker.len() < program_fragment.code.size() {
             state_tracker.resize_with(program_fragment.code.size(), || {
-                HashSet::with_capacity_and_hasher(256 * 4, RandomState::new())
+                HashSet::with_capacity(256 * 4)
             });
         }
 
@@ -190,17 +212,17 @@ pub fn run_program_fragment(
         } else {
             collect_and_return(BfRunResult::Success, &state_tracker)
         }
-    })
+    }
 }
 
 const MAX_STEPS: usize = 131066;
 
 static MAX_STEPS_REACHED: AtomicUsize = AtomicUsize::new(0);
 
-pub fn run_program_fragment_without_states(
-    program_fragment: &RunningProgramInfo,
+pub fn run_program_fragment_without_states<const MAX_TAPE_SIZE: usize>(
+    program_fragment: &RunningProgramInfo<MAX_TAPE_SIZE>,
     target_output: &[u8],
-) -> BfRunResult {
+) -> BfRunResult<MAX_TAPE_SIZE> {
     let mut steps = 0;
 
     let mut tape = program_fragment.continue_state.program_state.tape;
@@ -325,19 +347,19 @@ pub fn get_max_steps_reached() -> usize {
     MAX_STEPS_REACHED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-fn tabulate_hashset_sizes(state_tracker: &[HashSet<ProgramState, RandomState>]) {
-    if let Some(hist) = HASHSET_SIZE_HISTOGRAM.get() {
-        let mut map = hist.lock().unwrap();
-        for size in state_tracker.iter().map(|s| s.len()) {
-            *map.entry(size).or_insert(0) += 1;
-        }
-    }
-}
+// fn tabulate_hashset_sizes<(state_tracker: &[HashSet<ProgramState>]) {
+//     if let Some(hist) = HASHSET_SIZE_HISTOGRAM.get() {
+//         let mut map = hist.lock().unwrap();
+//         for size in state_tracker.iter().map(|s| s.len()) {
+//             *map.entry(size).or_insert(0) += 1;
+//         }
+//     }
+// }
 
-fn collect_and_return(
-    result: BfRunResult,
-    state_tracker: &[HashSet<ProgramState, RandomState>],
-) -> BfRunResult {
+fn collect_and_return<const MAX_TAPE_SIZE: usize>(
+    result: BfRunResult<MAX_TAPE_SIZE>,
+    state_tracker: &[HashSet<ProgramState<MAX_TAPE_SIZE>>],
+) -> BfRunResult<MAX_TAPE_SIZE> {
     // tabulate_hashset_sizes(state_tracker);
     result
 }
