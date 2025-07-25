@@ -1,3 +1,4 @@
+turn all of these into github issues
 look at smallvec to get rid of heap allocation, they are destroying performance in the hot path
 add additional logic for jump tables to handle repeated loop closes and starts better
 review public APIs:
@@ -47,3 +48,5 @@ add CI
 - benchmarks
 - test coverage
 - MSRV
+write a good README.md
+write a good CONTRIBUTING.md
