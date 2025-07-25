@@ -1,19 +1,6 @@
-use std::{error::Error, io};
+use std::error::Error;
 
-use brainfuck_tui::{run_app, App, CrosstermTerminal};
-use ratatui::{
-    crossterm::{
-        event::{DisableMouseCapture, EnableMouseCapture},
-        execute,
-        terminal::{
-            disable_raw_mode,
-            enable_raw_mode,
-            EnterAlternateScreen,
-            LeaveAlternateScreen,
-        },
-    },
-    prelude::*,
-};
+use brainfuck_tui::{App, CrosstermTerminal, run_app};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = CrosstermTerminal::new()?;

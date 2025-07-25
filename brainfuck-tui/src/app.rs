@@ -1,13 +1,13 @@
 use core::panic;
 use std::error::Error;
 
+use ratatui::Frame;
 use ratatui::crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::*;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
-use ratatui::{Frame, Terminal};
 use tui_scrollview::{ScrollView, ScrollViewState};
 
 use crate::raw_terminal::RawTerminal;
@@ -39,7 +39,7 @@ pub struct App {
     copy_buffer: Option<Vec<u8>>,
 }
 
-#[allow(unused)]
+#[allow(dead_code)]
 enum Direction {
     Up,
     Left,
@@ -49,6 +49,12 @@ enum Direction {
     UpRight,
     DownLeft,
     DownRight,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl App {
@@ -585,11 +591,9 @@ impl App {
 pub fn run_app<T: RawTerminal>(terminal: &mut T, app: &mut App) -> Result<bool, Box<dyn Error>> {
     loop {
         terminal.draw(|f| app.draw(f))?;
-        if event::poll(std::time::Duration::from_millis(250))?
-            && !app.handle_event(event::read()?)
+        if event::poll(std::time::Duration::from_millis(250))? && !app.handle_event(event::read()?)
         {
             return Ok(false);
         }
     }
 }
-
