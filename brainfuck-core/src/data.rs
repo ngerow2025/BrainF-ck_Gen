@@ -90,7 +90,7 @@ impl CompressedBF {
                 capacity, size
             );
         }
-        let required_bytes = (capacity + 1) / 2;
+        let required_bytes = capacity.div_ceil(2);
         CompressedBF {
             data: vec![0u8; required_bytes],
             size,
@@ -131,7 +131,7 @@ impl CompressedBF {
     }
 
     pub fn append(&mut self, value: BfInstruction) {
-        let required_bytes = ((self.size + 1) + 1) / 2;
+        let required_bytes = (self.size + 1).div_ceil(2);
         if self.data.len() < required_bytes {
             self.data.resize(required_bytes, 0);
         }
@@ -146,8 +146,19 @@ impl CompressedBF {
         }
         res
     }
+}
 
-    pub fn to_string(&self) -> String {
+impl Clone for CompressedBF {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            size: self.size,
+        }
+    }
+}
+
+impl Display for CompressedBF {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = String::new();
         for i in 0..self.size {
             s.push(match self.get(i) {
@@ -162,24 +173,6 @@ impl CompressedBF {
                 None => '?', // Placeholder for invalid instruction
             });
         }
-        s
-    }
-}
-
-impl Clone for CompressedBF {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data.clone(),
-            size: self.size,
-        }
-    }
-}
-
-impl Display for CompressedBF {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let instructions: Vec<String> = (0..self.size)
-            .filter_map(|i| self.get(i).map(|instr| instr.to_string()))
-            .collect();
-        write!(f, "{}", instructions.join(""))
+        write!(f, "{}", s)
     }
 }

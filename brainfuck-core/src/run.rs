@@ -1,12 +1,10 @@
 use crate::data::{BfInstruction, CompressedBF};
-use std::any::Any;
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
-use std::sync::OnceLock;
+use lazy_static::lazy_static;
+use std::any::Any;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
-use lazy_static::lazy_static;
-
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum BfRunResult<const MAX_TAPE_SIZE: usize> {
@@ -56,23 +54,25 @@ pub struct ProgramState<const MAX_TAPE_SIZE: usize> {
     pub(crate) tape_head: u8,
 }
 
-
-
 lazy_static! {
     static ref GLOBAL: Mutex<HashMap<usize, Box<dyn Any + Send + Sync>>> =
         Mutex::new(HashMap::new());
 }
 
-
-fn get_state_tracker<const MAX_TAPE_SIZE: usize>() -> Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>> {
+fn get_state_tracker<const MAX_TAPE_SIZE: usize>()
+-> Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>> {
     let mut global = GLOBAL.lock().unwrap();
     let entry = global.entry(MAX_TAPE_SIZE).or_insert_with(|| {
-        Box::new(HashMap::<ThreadId, Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>>::new())
-            as Box<dyn Any + Send + Sync>
+        Box::new(HashMap::<
+            ThreadId,
+            Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>,
+        >::new()) as Box<dyn Any + Send + Sync>
     });
 
     // Downcast to the correct type
-    let map = entry.downcast_mut::<HashMap<ThreadId, Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>>>().unwrap();
+    let map = entry
+        .downcast_mut::<HashMap<ThreadId, Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>>>()
+        .unwrap();
 
     let thread_id = std::thread::current().id();
     map.entry(thread_id)
@@ -107,10 +107,7 @@ pub fn run_program_fragment<const MAX_TAPE_SIZE: usize>(
         let mut output_ind = program_fragment.continue_state.resume_output_ind; // Resume from the last output index
 
         while pc < program_fragment.code.size() {
-            let current_state = ProgramState {
-                tape: tape.clone(),
-                tape_head,
-            };
+            let current_state = ProgramState { tape, tape_head };
             if state_tracker[pc].contains(&current_state) {
                 return collect_and_return(BfRunResult::InfiniteLoopError, &state_tracker);
             } else {
@@ -119,7 +116,10 @@ pub fn run_program_fragment<const MAX_TAPE_SIZE: usize>(
 
             match program_fragment.code.get(pc) {
                 None => {
-                    panic!("could not read current BF instruction, pc: {}, program: {:?}", pc, program_fragment.code);
+                    panic!(
+                        "could not read current BF instruction, pc: {}, program: {:?}",
+                        pc, program_fragment.code
+                    );
                 }
                 Some(BfInstruction::Inc) => {
                     tape[tape_head as usize] = tape[tape_head as usize].wrapping_add(1);
@@ -142,7 +142,10 @@ pub fn run_program_fragment<const MAX_TAPE_SIZE: usize>(
                 Some(BfInstruction::LoopStart) => {
                     if tape[tape_head as usize] == 0 {
                         if program_fragment.jump_table[pc] == -1 {
-                            panic!("jump table is not initialized correctly, found -1 at LoopStart, pc: {}, program: {:?}, jump_table: {:?}", pc, program_fragment.code, program_fragment.jump_table);
+                            panic!(
+                                "jump table is not initialized correctly, found -1 at LoopStart, pc: {}, program: {:?}, jump_table: {:?}",
+                                pc, program_fragment.code, program_fragment.jump_table
+                            );
                         }
                         if program_fragment.jump_table[pc] == -2 {
                             return collect_and_return(BfRunResult::NOOPError, &state_tracker);
@@ -154,7 +157,10 @@ pub fn run_program_fragment<const MAX_TAPE_SIZE: usize>(
                 Some(BfInstruction::LoopEnd) => {
                     if tape[tape_head as usize] != 0 {
                         if program_fragment.jump_table[pc] == -1 {
-                            panic!("jump table is not initialized correctly, found -1 at LoopEnd, pc: {}, program: {:?}, jump_table: {:?}", pc, program_fragment.code, program_fragment.jump_table);
+                            panic!(
+                                "jump table is not initialized correctly, found -1 at LoopEnd, pc: {}, program: {:?}, jump_table: {:?}",
+                                pc, program_fragment.code, program_fragment.jump_table
+                            );
                         }
                         pc = program_fragment.jump_table[pc] as usize;
                         continue;
@@ -185,10 +191,7 @@ pub fn run_program_fragment<const MAX_TAPE_SIZE: usize>(
         if program_fragment.current_paren_count != 0 {
             return collect_and_return(
                 BfRunResult::IncompleteLoopSuccess(ContinueState {
-                    program_state: ProgramState {
-                        tape: tape.clone(),
-                        tape_head,
-                    },
+                    program_state: ProgramState { tape, tape_head },
                     resume_pc: pc,
                     resume_output_ind: output_ind,
                 }),
@@ -199,10 +202,7 @@ pub fn run_program_fragment<const MAX_TAPE_SIZE: usize>(
         if output_ind != target_output.len() {
             collect_and_return(
                 BfRunResult::IncompleteOutputSuccess(ContinueState {
-                    program_state: ProgramState {
-                        tape: tape.clone(),
-                        tape_head,
-                    },
+                    program_state: ProgramState { tape, tape_head },
                     resume_pc: pc,
                     resume_output_ind: output_ind,
                 }),
@@ -219,8 +219,8 @@ pub fn run_program_fragment_no_target<const MAX_TAPE_SIZE: usize, FInput, FOutpu
     program_fragment: &RunningProgramInfo<MAX_TAPE_SIZE>,
     mut read_input: FInput,
     mut write_output: FOutput,
-) -> BfRunResult<MAX_TAPE_SIZE> 
-where 
+) -> BfRunResult<MAX_TAPE_SIZE>
+where
     FInput: FnMut() -> Option<u8>,
     FOutput: FnMut(u8),
 {
@@ -245,10 +245,7 @@ where
         let mut output_ind = program_fragment.continue_state.resume_output_ind; // Resume from the last output index
 
         while pc < program_fragment.code.size() {
-            let current_state = ProgramState {
-                tape: tape.clone(),
-                tape_head,
-            };
+            let current_state = ProgramState { tape, tape_head };
             if state_tracker[pc].contains(&current_state) {
                 return collect_and_return(BfRunResult::InfiniteLoopError, &state_tracker);
             } else {
@@ -257,7 +254,10 @@ where
 
             match program_fragment.code.get(pc) {
                 None => {
-                    panic!("could not read current BF instruction, pc: {}, program: {:?}", pc, program_fragment.code);
+                    panic!(
+                        "could not read current BF instruction, pc: {}, program: {:?}",
+                        pc, program_fragment.code
+                    );
                 }
                 Some(BfInstruction::Inc) => {
                     tape[tape_head as usize] = tape[tape_head as usize].wrapping_add(1);
@@ -280,7 +280,10 @@ where
                 Some(BfInstruction::LoopStart) => {
                     if tape[tape_head as usize] == 0 {
                         if program_fragment.jump_table[pc] == -1 {
-                            panic!("jump table is not initialized correctly, found -1 at LoopStart, pc: {}, program: {:?}, jump_table: {:?}", pc, program_fragment.code, program_fragment.jump_table);
+                            panic!(
+                                "jump table is not initialized correctly, found -1 at LoopStart, pc: {}, program: {:?}, jump_table: {:?}",
+                                pc, program_fragment.code, program_fragment.jump_table
+                            );
                         }
                         if program_fragment.jump_table[pc] == -2 {
                             return collect_and_return(BfRunResult::NOOPError, &state_tracker);
@@ -292,7 +295,10 @@ where
                 Some(BfInstruction::LoopEnd) => {
                     if tape[tape_head as usize] != 0 {
                         if program_fragment.jump_table[pc] == -1 {
-                            panic!("jump table is not initialized correctly, found -1 at LoopEnd, pc: {}, program: {:?}, jump_table: {:?}", pc, program_fragment.code, program_fragment.jump_table);
+                            panic!(
+                                "jump table is not initialized correctly, found -1 at LoopEnd, pc: {}, program: {:?}, jump_table: {:?}",
+                                pc, program_fragment.code, program_fragment.jump_table
+                            );
                         }
                         pc = program_fragment.jump_table[pc] as usize;
                         continue;
@@ -317,10 +323,7 @@ where
         if program_fragment.current_paren_count != 0 {
             return collect_and_return(
                 BfRunResult::IncompleteLoopSuccess(ContinueState {
-                    program_state: ProgramState {
-                        tape: tape.clone(),
-                        tape_head,
-                    },
+                    program_state: ProgramState { tape, tape_head },
                     resume_pc: pc,
                     resume_output_ind: output_ind,
                 }),
@@ -328,8 +331,7 @@ where
             );
         }
 
-        
-        collect_and_return(BfRunResult::Success, &state_tracker)        
+        collect_and_return(BfRunResult::Success, &state_tracker)
     }
 }
 
@@ -436,10 +438,7 @@ pub fn run_program_fragment_without_states<const MAX_TAPE_SIZE: usize>(
     if program_fragment.current_paren_count != 0 {
         MAX_STEPS_REACHED.fetch_max(steps, std::sync::atomic::Ordering::Relaxed);
         return BfRunResult::IncompleteLoopSuccess(ContinueState {
-            program_state: ProgramState {
-                tape: tape.clone(),
-                tape_head,
-            },
+            program_state: ProgramState { tape, tape_head },
             resume_pc: pc,
             resume_output_ind: output_ind,
         });
@@ -447,10 +446,7 @@ pub fn run_program_fragment_without_states<const MAX_TAPE_SIZE: usize>(
 
     let result = if output_ind != target_output.len() {
         BfRunResult::IncompleteOutputSuccess(ContinueState {
-            program_state: ProgramState {
-                tape: tape.clone(),
-                tape_head,
-            },
+            program_state: ProgramState { tape, tape_head },
             resume_pc: pc,
             resume_output_ind: output_ind,
         })
@@ -461,6 +457,8 @@ pub fn run_program_fragment_without_states<const MAX_TAPE_SIZE: usize>(
     result
 }
 
+//this will be used later for potential analysis
+#[allow(dead_code)]
 pub fn get_max_steps_reached() -> usize {
     MAX_STEPS_REACHED.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -474,10 +472,12 @@ pub fn get_max_steps_reached() -> usize {
 //     }
 // }
 
+//this is for later potential analysis
 fn collect_and_return<const MAX_TAPE_SIZE: usize>(
     result: BfRunResult<MAX_TAPE_SIZE>,
     state_tracker: &[HashSet<ProgramState<MAX_TAPE_SIZE>>],
 ) -> BfRunResult<MAX_TAPE_SIZE> {
+    let _ = state_tracker;
     // tabulate_hashset_sizes(state_tracker);
     result
 }

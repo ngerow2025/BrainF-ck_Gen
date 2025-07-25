@@ -1,10 +1,23 @@
-use std::{fs::{File, OpenOptions}, io::{BufReader, BufWriter, Read, Write}, sync::{mpsc::{self, Sender}, Arc, Mutex}, thread::{self, JoinHandle}};
+use std::{
+    fs::{File, OpenOptions},
+    io::{BufReader, BufWriter, Read, Write},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Sender},
+    },
+    thread::{self, JoinHandle},
+};
 
 use ahash::{HashSet, RandomState};
 
-use crate::{data::{BfInstruction, CompressedBF}, run::{get_max_steps_reached, run_program_fragment, run_program_fragment_without_states, BfRunResult, ContinueState, ProgramState, RunningProgramInfo}, MAX_TAPE_SIZE};
-
-
+use crate::{
+    MAX_TAPE_SIZE,
+    data::{BfInstruction, CompressedBF},
+    run::{
+        BfRunResult, ContinueState, ProgramState, RunningProgramInfo, get_max_steps_reached,
+        run_program_fragment, run_program_fragment_without_states,
+    },
+};
 
 fn find_program(
     target_output: &[u8],
@@ -328,7 +341,7 @@ impl<const MAX_TAPE_SIZE: usize> DiskSeedWriter<MAX_TAPE_SIZE> {
         };
 
         let mut file = BufWriter::with_capacity(1_000_000_000, file);
-        file.write(&program_size.to_ne_bytes()).unwrap();
+        file.write_all(&program_size.to_ne_bytes()).unwrap();
 
         let file = Arc::new(Mutex::new(file));
         let (sender, receiver) = mpsc::channel::<RunningProgramInfo<MAX_TAPE_SIZE>>();
@@ -352,8 +365,7 @@ impl<const MAX_TAPE_SIZE: usize> DiskSeedWriter<MAX_TAPE_SIZE> {
                 let jump_table_bytes = program
                     .jump_table
                     .iter()
-                    .map(|&x| x.to_ne_bytes())
-                    .flatten()
+                    .flat_map(|&x| x.to_ne_bytes())
                     .collect::<Vec<u8>>();
                 file.write_all(&jump_table_bytes)
                     .expect("Could not write jump table");
@@ -429,11 +441,11 @@ impl DiskSeedReader {
         let mut size_bytes = [0u8; usize::to_ne_bytes(0).len()];
         file.read_exact(&mut size_bytes)
             .expect("Could not read program size from file");
-        let program_size = usize::from_ne_bytes(size_bytes);
-        if program_size != program_size {
+        let read_program_size = usize::from_ne_bytes(size_bytes);
+        if program_size != read_program_size {
             panic!(
                 "Program size does not match expected size: {} != {}",
-                program_size, program_size
+                program_size, read_program_size
             );
         }
 

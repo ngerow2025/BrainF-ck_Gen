@@ -36,7 +36,7 @@ add docs examples and tests:
 add examples:
 - core
 add integration/end-to-end tests
-add custom error types and messages:
+add custom error types and messages and handling:
 - core
 - tui
 - main
