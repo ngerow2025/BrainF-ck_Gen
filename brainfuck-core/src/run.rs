@@ -56,7 +56,6 @@ pub struct ProgramState<const MAX_TAPE_SIZE: usize> {
     pub(crate) tape_head: u8,
 }
 
-pub static HASHSET_SIZE_HISTOGRAM: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
 
 
 lazy_static! {
@@ -68,7 +67,7 @@ lazy_static! {
 fn get_state_tracker<const MAX_TAPE_SIZE: usize>() -> Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>> {
     let mut global = GLOBAL.lock().unwrap();
     let entry = global.entry(MAX_TAPE_SIZE).or_insert_with(|| {
-        Box::new(HashMap::<ThreadId, Arc<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>::new())
+        Box::new(HashMap::<ThreadId, Arc<Mutex<Vec<HashSet<ProgramState<MAX_TAPE_SIZE>>>>>>::new())
             as Box<dyn Any + Send + Sync>
     });
 
