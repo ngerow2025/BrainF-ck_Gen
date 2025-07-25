@@ -1,8 +1,8 @@
 use brainfuck_core::{run_program_fragment_no_target, util::preprocess_input};
-use clap::{Parser, Subcommand, Args, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::fs;
 
-use brainfuck_tui::{run_app, App, CrosstermTerminal};
+use brainfuck_tui::{App, CrosstermTerminal, run_app};
 
 /// CLI for processing and searching inputs
 #[derive(Parser)]
@@ -71,18 +71,16 @@ fn main() {
         Commands::Run(args) => {
             let input = match args.input {
                 Some(s) => s,
-                None => {
-                    fs::read_to_string(args.file.expect("Expected file")).expect("Failed to read file")
-                }
+                None => fs::read_to_string(args.file.expect("Expected file"))
+                    .expect("Failed to read file"),
             };
             run_code(&input);
         }
         Commands::Search(args) => {
             let input = match args.target {
                 Some(s) => s,
-                None => {
-                    fs::read_to_string(args.file.expect("Expected file")).expect("Failed to read file")
-                }
+                None => fs::read_to_string(args.file.expect("Expected file"))
+                    .expect("Failed to read file"),
             };
             search_handler(&input, args.format, args.multithread);
         }
@@ -99,9 +97,13 @@ fn run_code(input: &str) {
     let preprocessed_code = preprocess_input(input);
     match preprocessed_code {
         Ok(running_program_info) => {
-            run_program_fragment_no_target(&running_program_info, || None, |output| {
-                print!("{}", output as char);
-            });
+            run_program_fragment_no_target(
+                &running_program_info,
+                || None,
+                |output| {
+                    print!("{}", output as char);
+                },
+            );
         }
         Err(e) => {
             eprintln!("Error preprocessing input: {}", e);
@@ -110,7 +112,10 @@ fn run_code(input: &str) {
 }
 
 fn search_handler(input: &str, format: InputFormat, multithread: bool) {
-    println!("Searching in format {:?} with multithread: {}", format, multithread);
+    println!(
+        "Searching in format {:?} with multithread: {}",
+        format, multithread
+    );
     println!("Input:\n{}", input);
     // Your actual logic here
 }
