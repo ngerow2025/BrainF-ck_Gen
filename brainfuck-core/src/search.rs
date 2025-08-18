@@ -13,7 +13,6 @@ use std::{
 use ahash::{HashSet, RandomState};
 
 use crate::{
-    MAX_TAPE_SIZE,
     data::{BfInstruction, CompressedBF},
     run::{
         BfRunResult, ContinueState, ProgramState, RunningProgramInfo, get_max_steps_reached,
@@ -21,7 +20,7 @@ use crate::{
     },
 };
 
-fn find_program(
+fn find_program<const MAX_TAPE_SIZE: usize>(
     target_output: &[u8],
     starting_program: String,
 ) -> Result<Vec<BfInstruction>, &'static str> {
@@ -68,12 +67,12 @@ fn find_program(
         current_paren_count: 0,
         jump_table,
         continue_state: ContinueState {
+            resume_pc: 0,
+            resume_output_ind: 0,
             program_state: ProgramState {
                 tape: [0u8; MAX_TAPE_SIZE],
                 tape_head: 0,
             },
-            resume_pc: 0,
-            resume_output_ind: 0,
         },
     };
 
@@ -454,7 +453,7 @@ impl DiskSeedReader {
         DiskSeedReader { file, program_size }
     }
 
-    pub fn read_seed(&mut self) -> Option<RunningProgramInfo<MAX_TAPE_SIZE>> {
+    pub fn read_seed<const MAX_TAPE_SIZE: usize>(&mut self) -> Option<RunningProgramInfo<MAX_TAPE_SIZE>> {
         let mut code = CompressedBF::new(self.program_size, self.program_size + 1);
         let mut jump_table = Vec::with_capacity(self.program_size + 1);
 

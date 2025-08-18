@@ -94,7 +94,7 @@ fn main() {
 }
 
 fn run_code(input: &str) {
-    let preprocessed_code = preprocess_input(input);
+    let preprocessed_code = preprocess_input::<30_000>(input);
     match preprocessed_code {
         Ok(running_program_info) => {
             run_program_fragment_no_target(

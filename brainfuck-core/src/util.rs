@@ -6,14 +6,14 @@ use crate::{
 };
 
 // TODO: Do actual error types instead of hamfisted &'static str
-pub fn preprocess_input(input: &str) -> Result<RunningProgramInfo<30_000>, &'static str> {
+pub fn preprocess_input<const MAX_TAPE_SIZE: usize>(input: &str) -> Result<RunningProgramInfo<MAX_TAPE_SIZE>, &'static str> {
     let program_code = CompressedBF::from_string(input);
 
     let continue_state = ContinueState {
         resume_pc: 0,
         resume_output_ind: 0,
         program_state: ProgramState {
-            tape: [0; 30_000],
+            tape: [0; MAX_TAPE_SIZE],
             tape_head: 0,
         },
     };
