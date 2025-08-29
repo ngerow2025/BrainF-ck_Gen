@@ -1,3 +1,4 @@
+mod file_io;
 mod data;
 mod run;
 mod search;
