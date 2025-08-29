@@ -176,3 +176,17 @@ impl Display for CompressedBF {
         write!(f, "{}", s)
     }
 }
+
+impl PartialEq for CompressedBF {
+    fn eq(&self, other: &Self) -> bool {
+        if self.size != other.size {
+            return false;
+        }
+        for i in 0..self.size {
+            if self.get(i) != other.get(i) {
+                return false;
+            }
+        }
+        true
+    }
+}
