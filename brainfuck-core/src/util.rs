@@ -31,8 +31,33 @@ pub fn preprocess_input<const MAX_TAPE_SIZE: usize>(input: &str) -> Result<Runni
             BfInstruction::LoopEnd => {
                 //find the last -2 in the jump table and set it to the current index + 1 and append the index of the loop start + 1
                 if let Some(loop_start_index) = jump_table.iter().rposition(|&x| x == -2) {
-                    jump_table[loop_start_index] = i as i64 + 1; // set the loop start to the current index + 1
-                    jump_table.push((loop_start_index + 1) as i64); // append the index of the loop start + 1
+                    //jump from loop start to loop end
+                    {
+                        let mut jump_target = i as i64 + 1;
+                        while let Some(instruction) = program_code.get(jump_target as usize) {
+                            if instruction == BfInstruction::LoopEnd {
+                                jump_target += 1;
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+                        jump_table[loop_start_index] = jump_target; //set the loop start to the current index + 1
+                    }
+
+                    //jump from loop end to loop start
+                    {
+                        let mut jump_target = loop_start_index + 1;
+                        while let Some(instruction) = program_code.get(jump_target) {
+                            if instruction == BfInstruction::LoopStart {
+                                jump_target += 1;
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+                        jump_table.push(jump_target as i64); // append the index of the loop start + 1
+                    }
                     current_paren_count -= 1;
                 } else {
                     return Err("Loop end without matching loop start.");
@@ -53,6 +78,8 @@ pub fn preprocess_input<const MAX_TAPE_SIZE: usize>(input: &str) -> Result<Runni
         continue_state,
     })
 }
+
+
 
 // pub fn run_program(input: RunningProgramInfo<30_000>) {
 //     let internal_res = run_program_fragment_no_target(input.code, );
