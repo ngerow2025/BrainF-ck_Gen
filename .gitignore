@@ -1,2 +1,5 @@
 /target
 program_seeds_*.bin
+*.profraw
+*.profdata
+tarpaulin-report.html

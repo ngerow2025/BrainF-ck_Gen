@@ -6,7 +6,9 @@ use crate::{
 };
 
 // TODO: Do actual error types instead of hamfisted &'static str
-pub fn preprocess_input<const MAX_TAPE_SIZE: usize>(input: &str) -> Result<RunningProgramInfo<MAX_TAPE_SIZE>, &'static str> {
+pub fn preprocess_input<const MAX_TAPE_SIZE: usize>(
+    input: &str,
+) -> Result<RunningProgramInfo<MAX_TAPE_SIZE>, &'static str> {
     let program_code = CompressedBF::from_string(input);
 
     let continue_state = ContinueState {
@@ -82,14 +84,14 @@ mod tests {
         let result = preprocess_input::<TAPE_SIZE>(input);
         assert!(result.is_ok());
         let info = result.unwrap();
-        
+
         let expected_code = CompressedBF::from_string(input);
         assert_eq!(info.code, expected_code);
-        
+
         // The jump table will contain 6 zeros from initialization and then 6 `-1`s pushed due to the bug.
         let expected_jump_table = vec![-1, -1, -1, -1, -1, -1];
         assert_eq!(info.jump_table, expected_jump_table);
-        
+
         assert_eq!(info.current_paren_count, 0);
     }
 
@@ -101,12 +103,11 @@ mod tests {
         assert!(result.is_ok());
         let info = result.unwrap();
 
-        
         let expected_jump_table = vec![-1, 3, 2];
         assert_eq!(info.jump_table, expected_jump_table);
         assert_eq!(info.current_paren_count, 0);
     }
-    
+
     /// Tests a program with nested loops.
     #[test]
     fn test_nested_loops() {
@@ -114,12 +115,12 @@ mod tests {
         let result = preprocess_input::<TAPE_SIZE>(input);
         assert!(result.is_ok());
         let info = result.unwrap();
-        
+
         let expected_jump_table = vec![4, 3, 2, 1];
         assert_eq!(info.jump_table, expected_jump_table);
         assert_eq!(info.current_paren_count, 0);
     }
-    
+
     /// Tests for an unclosed loop start bracket '['.
     #[test]
     fn test_unmatched_loop_start() {
@@ -146,7 +147,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Loop end without matching loop start.");
     }
-    
+
     /// Verifies that the initial state of the program is set correctly.
     #[test]
     fn test_initial_continue_state() {
@@ -181,7 +182,9 @@ mod tests {
         let info = result.unwrap();
 
         for (i, &value) in info.jump_table.iter().enumerate() {
-            if info.code.get(i) == Some(BfInstruction::LoopStart) || info.code.get(i) == Some(BfInstruction::LoopEnd) {
+            if info.code.get(i) == Some(BfInstruction::LoopStart)
+                || info.code.get(i) == Some(BfInstruction::LoopEnd)
+            {
                 assert!(value != -2);
             } else {
                 assert_eq!(value, -1);

@@ -3,9 +3,12 @@
 use ahash::{HashSet, RandomState};
 
 use crate::{
-    data::{BfInstruction, CompressedBF}, file_io::{DiskSeedReader, DiskSeedWriter}, run::{
-        get_max_steps_reached, run_program_fragment, run_program_fragment_without_states, BfRunResult, ContinueState, ProgramState, RunningProgramInfo
-    }
+    data::{BfInstruction, CompressedBF},
+    file_io::{DiskSeedReader, DiskSeedWriter},
+    run::{
+        BfRunResult, ContinueState, ProgramState, RunningProgramInfo, get_max_steps_reached,
+        run_program_fragment, run_program_fragment_without_states,
+    },
 };
 
 fn find_program<const MAX_TAPE_SIZE: usize>(

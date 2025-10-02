@@ -190,3 +190,102 @@ impl PartialEq for CompressedBF {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bf_instruction_from_to_and_display() {
+        let symbols = ['+', '-', '<', '>', '[', ']', ',', '.'];
+        for (i, &sym) in symbols.iter().enumerate() {
+            let as_u8 = i as u8;
+            let inst = BfInstruction::from_u8(as_u8).expect("from_u8 should return Some");
+            assert_eq!(inst.to_u8(), as_u8);
+            assert_eq!(format!("{}", inst), sym.to_string());
+        }
+        // invalid value returns None
+        assert!(BfInstruction::from_u8(255).is_none());
+    }
+
+    #[test]
+    fn test_compressedbf_append_get_set_size_to_vec_and_display() {
+        let mut bf = CompressedBF::new(0, 0);
+        assert_eq!(bf.size(), 0);
+
+        bf.append(BfInstruction::Inc);
+        bf.append(BfInstruction::Dec);
+        bf.append(BfInstruction::Left);
+        bf.append(BfInstruction::Right);
+
+        assert_eq!(bf.size(), 4);
+        assert_eq!(bf.get(0), Some(BfInstruction::Inc));
+        assert_eq!(bf.get(1), Some(BfInstruction::Dec));
+        assert_eq!(bf.get(2), Some(BfInstruction::Left));
+        assert_eq!(bf.get(3), Some(BfInstruction::Right));
+
+        // set and verify
+        bf.set(1, BfInstruction::Output);
+        assert_eq!(bf.get(1), Some(BfInstruction::Output));
+
+        let vec = bf.to_vec();
+        assert_eq!(vec, vec![BfInstruction::Inc, BfInstruction::Output, BfInstruction::Left, BfInstruction::Right]);
+
+        // Display produces corresponding symbols
+        assert_eq!(format!("{}", bf), "+.<>".to_string());
+    }
+
+    #[test]
+    fn test_compressedbf_from_string_iter_and_to_vec() {
+        let s = "+-<>[],.";
+        let bf = CompressedBF::from_string(s);
+        assert_eq!(bf.size(), 8);
+        let collected: String = bf.iter().map(|i| format!("{}", i)).collect();
+        assert_eq!(collected, s.to_string());
+        assert_eq!(bf.to_vec().len(), 8);
+    }
+
+    #[test]
+    fn test_iter_collects_correctly() {
+        let mut bf = CompressedBF::new(0, 0);
+        bf.append(BfInstruction::Inc);
+        bf.append(BfInstruction::Dec);
+        bf.append(BfInstruction::Output);
+
+        let collected: Vec<BfInstruction> = bf.iter().collect();
+        assert_eq!(collected, vec![BfInstruction::Inc, BfInstruction::Dec, BfInstruction::Output]);
+    }
+
+    #[test]
+    fn test_clone_and_partial_eq() {
+        let mut a = CompressedBF::new(0, 0);
+        a.append(BfInstruction::Inc);
+        a.append(BfInstruction::Dec);
+        let b = a.clone();
+        assert_eq!(a, b);
+        // modify a and ensure inequality
+        a.set(0, BfInstruction::Output);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_new_capacity_less_than_size_panics() {
+        // capacity < size should panic
+        let _ = CompressedBF::new(5, 4);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_out_of_bounds_panics() {
+        let mut bf = CompressedBF::new(1, 1);
+        // valid indices: 0 only. Setting index 1 must panic.
+        bf.set(1, BfInstruction::Inc);
+    }
+
+    #[test]
+    fn test_get_out_of_range_returns_none() {
+        let bf = CompressedBF::new(1, 1);
+        assert_eq!(bf.get(1), None);
+    }
+}

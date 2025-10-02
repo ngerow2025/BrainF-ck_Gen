@@ -1,5 +1,5 @@
-mod file_io;
 mod data;
+mod file_io;
 mod run;
 mod search;
 pub mod util;

@@ -26,7 +26,7 @@ pub struct ContinueState<const MAX_TAPE_SIZE: usize> {
     pub(crate) resume_output_ind: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct RunningProgramInfo<const MAX_TAPE_SIZE: usize> {
     pub(crate) code: CompressedBF,
     pub(crate) current_paren_count: usize,
@@ -481,3 +481,6 @@ fn collect_and_return<const MAX_TAPE_SIZE: usize>(
     // tabulate_hashset_sizes(state_tracker);
     result
 }
+
+#[cfg(test)]
+mod tests;
